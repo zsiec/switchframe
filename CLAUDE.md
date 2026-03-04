@@ -95,7 +95,7 @@ research/                        # Detailed research by topic
 ## Current State (Phase 3 Complete)
 
 - **Branch:** `phase3-video-audio` (34 commits ahead of phase2-browser-ui)
-- **Tests:** 118 Go tests + 66 Vitest tests + 15 E2E tests passing with `-race`
+- **Tests:** 119 Go tests + 66 Vitest tests + 15 E2E tests passing with `-race`
 - **What works:** Everything from Phases 1-2 + live MoQ video in multiview tiles and program/preview windows, server-side audio mixer with passthrough optimization, FDK AAC decode/encode via cgo, per-channel level/mute/AFV, equal-power crossfade on cut, PFL monitoring, VU metering, audio REST API, WebTransport connection manager with REST polling fallback, AudioMixer UI with channel strips and faders
 - **What's stubbed:** Dissolve/wipe transitions (Phase 4), recording/SRT output (Phase 5), graphics overlay
 
