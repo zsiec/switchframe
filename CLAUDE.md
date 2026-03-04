@@ -45,6 +45,20 @@ server/                          # Go module (github.com/zsiec/switchframe/serve
     openh264_cgo.go                #   Centralized cgo CFLAGS/LDFLAGS for OpenH264
     openh264_decoder.go            #   OpenH264 H.264 decoder (cgo wrapper)
     openh264_encoder.go            #   OpenH264 H.264 encoder (cgo wrapper)
+  output/                          # Recording + SRT output engine
+    manager.go                     #   OutputManager: lifecycle, viewer, fan-out
+    muxer.go                       #   TSMuxer: MPEG-TS muxing (go-astits)
+    types.go                       #   OutputAdapter interface, status types
+    viewer.go                      #   outputViewer (distribution.Viewer on program relay)
+    recorder.go                    #   FileRecorder adapter (.ts file)
+    srt_caller.go                  #   SRTCaller adapter (push mode, reconnect)
+    srt_listener.go                #   SRTListener adapter (pull, N conns)
+    srt_common.go                  #   Shared srtConn interface
+    ringbuf.go                     #   Ring buffer for SRT reconnection
+    integration_test.go            #   End-to-end tests
+  codec/                           # Shared NALU + ADTS helpers
+    nalu.go                        #   AVC1↔Annex B conversion
+    adts.go                        #   ADTS header construction
   internal/                      # Shared types
     types.go                     #   ControlRoomState, SourceInfo, TallyStatus, AudioChannel
 ui/                              # SvelteKit frontend (Svelte 5 + TypeScript)
@@ -75,6 +89,9 @@ ui/                              # SvelteKit frontend (Svelte 5 + TypeScript)
       SourceTile.svelte          #   Single source button with tally color + canvas
       AudioMixer.svelte          #   Channel strips: faders, VU meters, PFL/MUTE/AFV
       KeyboardOverlay.svelte     #   Keyboard shortcut reference (press ?)
+      OutputControls.svelte        #   Header: REC button + SRT status indicator
+      RecordingControl.svelte      #   Recording start/stop/status
+      SRTOutputModal.svelte        #   SRT configuration modal
     routes/
       +page.svelte               #   Traditional broadcast layout
       +layout.svelte             #   Root layout (CSS import)
@@ -103,12 +120,12 @@ research/                        # Detailed research by topic
 4. **`phase0-findings.md`** — research context (skim sections relevant to your task)
 5. **`charter.md`** — full vision (read if you need business/UX context)
 
-## Current State (Phase 4 Complete)
+## Current State (Phase 5 Complete)
 
-- **Branch:** `phase4-dissolve-transitions` (19 commits ahead of phase3-video-audio)
-- **Tests:** 215 Go tests + 95 Vitest tests + 22 E2E tests passing with `-race`
-- **What works:** Everything from Phases 1-3 + server-side dissolve transitions (Mix, Dip to Black, FTB), OpenH264 cgo decode/encode, TransitionEngine with auto/manual (T-bar) position, audio crossfade synced with video transitions, transition REST API, WebGPU dissolve preview (Canvas 2D fallback), full TransitionControls UI with type/duration selectors
-- **What's stubbed:** Wipe transitions (post-MVP), recording/SRT output (Phase 5), graphics overlay, FTB reverse toggle
+- **Branch:** `phase5-recording-srt` (18 commits ahead of phase4-dissolve-transitions)
+- **Tests:** 334 Go tests + 123 Vitest tests + 22 E2E tests passing with `-race`
+- **What works:** Everything from Phases 1-4 + program recording (MPEG-TS), SRT output (caller push + listener pull), shared codec package (AVC1↔Annex B, ADTS), OutputManager with auto-start/stop muxer, ring buffer for SRT reconnection, exponential backoff, RecordingControl + SRTOutputModal browser components, OutputControls header
+- **What's stubbed:** Wipe transitions (post-MVP), graphics overlay, FTB reverse toggle, multi-destination SRT (v1.5), ISO per-source recording (v2.5)
 
 ## Key Architecture Decisions
 
@@ -133,6 +150,11 @@ research/                        # Detailed research by topic
 - **T-bar control:** Unthrottled REST position updates. HTTP/3 multiplexed on shared QUIC connection.
 - **Resolution mismatch:** Falls back to cut. No scaler in Phase 4.
 - **Browser dissolve:** WebGPU shader + Canvas 2D fallback. Client-side preview only; server produces authoritative output.
+- **Recording format:** MPEG-TS (.ts) -- crash-resilient (no moov atom), same muxer as SRT output.
+- **SRT modes:** Both caller (push to platform) and listener (accept N pulls, max 8). srtgo is pure Go (no cgo).
+- **Output lifecycle:** OutputManager auto-registers viewer on program relay when first output starts, removes when last stops. Zero CPU when inactive.
+- **SRT reconnection:** Exponential backoff (1s->30s) with 4MB ring buffer. Resume from keyframe if overflow.
+- **Shared codec:** `server/codec/` package used by transition pipeline AND output muxer for AVC1<->Annex B.
 
 ## Prism Dependency
 
