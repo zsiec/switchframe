@@ -36,6 +36,15 @@ server/                          # Go module (github.com/zsiec/switchframe/serve
   control/                       # REST API + state broadcast
     api.go                       #   HTTP handlers: cut, preview, state, sources, audio level/mute/AFV/master
     state.go                     #   StatePublisher (JSON serialize -> callback)
+  transition/                      # Dissolve transition engine
+    engine.go                      #   TransitionEngine lifecycle (start/ingest/complete/abort)
+    blend.go                       #   RGB alpha blending (mix, dip, FTB)
+    color.go                       #   BT.709 YUV420↔RGB colorspace conversion
+    codec.go                       #   VideoDecoder/VideoEncoder interfaces + mocks
+    types.go                       #   TransitionType/TransitionState constants
+    openh264_cgo.go                #   Centralized cgo CFLAGS/LDFLAGS for OpenH264
+    openh264_decoder.go            #   OpenH264 H.264 decoder (cgo wrapper)
+    openh264_encoder.go            #   OpenH264 H.264 encoder (cgo wrapper)
   internal/                      # Shared types
     types.go                     #   ControlRoomState, SourceInfo, TallyStatus, AudioChannel
 ui/                              # SvelteKit frontend (Svelte 5 + TypeScript)
@@ -51,8 +60,10 @@ ui/                              # SvelteKit frontend (Svelte 5 + TypeScript)
         handler.ts               #   Capture-phase keydown with event.code
       transport/                 # WebTransport connection management
         connection.ts            #   Auto-retry WebTransport with REST polling fallback
-      video/                     # Video playback
+      video/                     # Video playback and transition rendering
         playback.ts              #   Video playback manager (MoQ → decoder → buffer)
+        dissolve.ts              #   WebGPU dissolve renderer + Canvas 2D fallback
+        dissolve-fallback.ts     #   Canvas 2D dissolve/dip rendering
       audio/                     # Client-side audio
         pfl.ts                   #   PFL manager (per-source solo monitoring)
     components/                  # Svelte UI components
@@ -92,12 +103,12 @@ research/                        # Detailed research by topic
 4. **`phase0-findings.md`** — research context (skim sections relevant to your task)
 5. **`charter.md`** — full vision (read if you need business/UX context)
 
-## Current State (Phase 3 Complete)
+## Current State (Phase 4 Complete)
 
-- **Branch:** `phase3-video-audio` (34 commits ahead of phase2-browser-ui)
-- **Tests:** 119 Go tests + 66 Vitest tests + 15 E2E tests passing with `-race`
-- **What works:** Everything from Phases 1-2 + live MoQ video in multiview tiles and program/preview windows, server-side audio mixer with passthrough optimization, FDK AAC decode/encode via cgo, per-channel level/mute/AFV, equal-power crossfade on cut, PFL monitoring, VU metering, audio REST API, WebTransport connection manager with REST polling fallback, AudioMixer UI with channel strips and faders
-- **What's stubbed:** Dissolve/wipe transitions (Phase 4), recording/SRT output (Phase 5), graphics overlay
+- **Branch:** `phase4-dissolve-transitions` (19 commits ahead of phase3-video-audio)
+- **Tests:** 215 Go tests + 95 Vitest tests + 22 E2E tests passing with `-race`
+- **What works:** Everything from Phases 1-3 + server-side dissolve transitions (Mix, Dip to Black, FTB), OpenH264 cgo decode/encode, TransitionEngine with auto/manual (T-bar) position, audio crossfade synced with video transitions, transition REST API, WebGPU dissolve preview (Canvas 2D fallback), full TransitionControls UI with type/duration selectors
+- **What's stubbed:** Wipe transitions (post-MVP), recording/SRT output (Phase 5), graphics overlay, FTB reverse toggle
 
 ## Key Architecture Decisions
 
@@ -116,6 +127,12 @@ research/                        # Detailed research by topic
 - **PFL:** Client-side only, per-operator, no server involvement
 - **Program relay bridge:** Use `server.RegisterStream("program")` relay directly (zero extra Prism changes)
 - **AFV wiring:** State callback triggers `mixer.OnProgramChange` before state broadcast to browsers
+- **Dissolve transitions:** Server-side OpenH264 decode → RGB blend → encode. Returns to zero-CPU passthrough between transitions.
+- **Transition engine:** Created per-transition, destroyed on complete/abort. Wall-clock frame pairing, output driven by incoming source.
+- **Blend colorspace:** RGB (BT.709) for mathematically correct alpha compositing.
+- **T-bar control:** Unthrottled REST position updates. HTTP/3 multiplexed on shared QUIC connection.
+- **Resolution mismatch:** Falls back to cut. No scaler in Phase 4.
+- **Browser dissolve:** WebGPU shader + Canvas 2D fallback. Client-side preview only; server produces authoritative output.
 
 ## Prism Dependency
 
