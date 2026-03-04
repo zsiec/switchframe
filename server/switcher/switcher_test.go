@@ -82,8 +82,9 @@ func TestRegisterSource(t *testing.T) {
 	if !ok {
 		t.Fatal("Sources missing 'camera1'")
 	}
-	if src.Status != internal.SourceHealthy {
-		t.Errorf("Source status = %q, want %q", src.Status, internal.SourceHealthy)
+	// Newly registered source with no frames yet shows as offline.
+	if src.Status != internal.SourceOffline {
+		t.Errorf("Source status = %q, want %q", src.Status, internal.SourceOffline)
 	}
 	if src.Key != "camera1" {
 		t.Errorf("Source key = %q, want %q", src.Key, "camera1")
@@ -373,6 +374,30 @@ func TestCutAudioGatedUntilVideoKeyframe(t *testing.T) {
 	}
 	if viewer.audios[0].PTS != 400 {
 		t.Errorf("audio PTS = %d, want 400", viewer.audios[0].PTS)
+	}
+}
+
+func TestHealthStatusUpdatesOnFrames(t *testing.T) {
+	programRelay := newTestRelay()
+	sw := New(programRelay)
+
+	cam1Relay := newTestRelay()
+	sw.RegisterSource("camera1", cam1Relay)
+
+	// Before any frames: offline.
+	state := sw.State()
+	if state.Sources["camera1"].Status != internal.SourceOffline {
+		t.Errorf("before frames: status = %q, want %q", state.Sources["camera1"].Status, internal.SourceOffline)
+	}
+
+	// Send a frame (source must be on program for handleVideoFrame to record).
+	sw.Cut("camera1")
+	cam1Relay.BroadcastVideo(&media.VideoFrame{PTS: 100, IsKeyframe: true})
+
+	// After frame: healthy.
+	state = sw.State()
+	if state.Sources["camera1"].Status != internal.SourceHealthy {
+		t.Errorf("after frame: status = %q, want %q", state.Sources["camera1"].Status, internal.SourceHealthy)
 	}
 }
 

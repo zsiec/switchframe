@@ -41,15 +41,15 @@ func TestCutEndpoint(t *testing.T) {
 	}
 }
 
-func TestCutToMissingSourceReturns409(t *testing.T) {
+func TestCutToMissingSourceReturns404(t *testing.T) {
 	api, _ := setupTestAPI(t)
 	body := `{"source":"nonexistent"}`
 	req := httptest.NewRequest("POST", "/api/switch/cut", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	api.Mux().ServeHTTP(rec, req)
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusConflict)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotFound)
 	}
 }
 

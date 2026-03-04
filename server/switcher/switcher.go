@@ -32,6 +32,7 @@ type Switcher struct {
 	programRelay  *distribution.Relay
 	seq           uint64
 	stateCallback func(internal.ControlRoomState)
+	health        *healthMonitor
 }
 
 // Compile-time check that Switcher implements the frameHandler interface.
@@ -42,6 +43,21 @@ func New(programRelay *distribution.Relay) *Switcher {
 	return &Switcher{
 		sources:      make(map[string]*sourceState),
 		programRelay: programRelay,
+		health:       newHealthMonitor(nil),
+	}
+}
+
+// Close stops the health monitor and unregisters all sources.
+func (s *Switcher) Close() {
+	s.health.stop()
+	s.mu.Lock()
+	keys := make([]string, 0, len(s.sources))
+	for k := range s.sources {
+		keys = append(keys, k)
+	}
+	s.mu.Unlock()
+	for _, k := range keys {
+		s.UnregisterSource(k)
 	}
 }
 
@@ -78,6 +94,7 @@ func (s *Switcher) UnregisterSource(key string) {
 	}
 	ss.relay.RemoveViewer(ss.viewer.ID())
 	delete(s.sources, key)
+	s.health.removeSource(key)
 	if s.programSource == key {
 		s.programSource = ""
 	}
@@ -158,7 +175,7 @@ func (s *Switcher) buildStateLocked() internal.ControlRoomState {
 	sources := make(map[string]internal.SourceInfo, len(s.sources))
 	for key := range s.sources {
 		tally[key] = internal.TallyIdle
-		sources[key] = internal.SourceInfo{Key: key, Status: internal.SourceHealthy}
+		sources[key] = internal.SourceInfo{Key: key, Status: s.health.status(key)}
 	}
 	if s.programSource != "" {
 		tally[s.programSource] = internal.TallyProgram
@@ -190,6 +207,8 @@ func (s *Switcher) notifyStateChange(snapshot internal.ControlRoomState) {
 // program source are forwarded to the program Relay. After a cut, frames
 // are gated until the first keyframe (IDR) to prevent decoder artifacts.
 func (s *Switcher) handleVideoFrame(sourceKey string, frame *media.VideoFrame) {
+	s.health.recordFrame(sourceKey)
+
 	s.mu.Lock()
 	ss, ok := s.sources[sourceKey]
 	if !ok || s.programSource != sourceKey {
