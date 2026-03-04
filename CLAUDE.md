@@ -1,10 +1,11 @@
 # Switchframe
 
-Browser-based live video switcher built on [Prism](https://github.com/zsiec/prism). Target market: houses of worship.
+Browser-based live video switcher built on [Prism](https://github.com/zsiec/prism).
 
 ## Quick Start
 
 ```bash
+make demo                                  # 4 simulated cameras, open localhost:5173
 cd server && go build ./cmd/switchframe    # build
 cd server && go test ./... -race           # test
 make build                                 # build to bin/switchframe
@@ -20,6 +21,8 @@ make test-all                              # run all tests
 ```
 server/                          # Go module (github.com/zsiec/switchframe/server)
   cmd/switchframe/main.go        # Binary entry point (standalone HTTP on :8080)
+    embed_prod.go                #   Static file embedding (build tag: embed_ui)
+    embed_dev.go                 #   No-op handler (default, dev mode)
   switcher/                      # Core switching engine
     switcher.go                  #   State machine: Cut(), SetPreview(), frame routing, audio handler
     source_viewer.go             #   Per-source Viewer proxy (tags frames with source key)
@@ -50,15 +53,18 @@ server/                          # Go module (github.com/zsiec/switchframe/serve
     muxer.go                       #   TSMuxer: MPEG-TS muxing (go-astits)
     types.go                       #   OutputAdapter interface, status types
     viewer.go                      #   outputViewer (distribution.Viewer on program relay)
-    recorder.go                    #   FileRecorder adapter (.ts file)
-    srt_caller.go                  #   SRTCaller adapter (push mode, reconnect)
+    recorder.go                    #   FileRecorder adapter (.ts file, rotation)
+    srt_caller.go                  #   SRTCaller adapter (push mode, reconnect, overflow callback)
     srt_listener.go                #   SRTListener adapter (pull, N conns)
     srt_common.go                  #   Shared srtConn interface
+    srt_wire.go                    #   Real srtgo connection wrappers
     ringbuf.go                     #   Ring buffer for SRT reconnection
     integration_test.go            #   End-to-end tests
   codec/                           # Shared NALU + ADTS helpers
     nalu.go                        #   AVC1↔Annex B conversion
     adts.go                        #   ADTS header construction
+  demo/                            # Simulated camera sources for demo mode
+    source.go                      #   StartSources(): N fake cameras at 30fps
   internal/                      # Shared types
     types.go                     #   ControlRoomState, SourceInfo, TallyStatus, AudioChannel
 ui/                              # SvelteKit frontend (Svelte 5 + TypeScript)
@@ -74,6 +80,7 @@ ui/                              # SvelteKit frontend (Svelte 5 + TypeScript)
         handler.ts               #   Capture-phase keydown with event.code
       transport/                 # WebTransport connection management
         connection.ts            #   Auto-retry WebTransport with REST polling fallback
+        media-pipeline.ts        #   MoQ → decoder orchestrator (per-source)
       video/                     # Video playback and transition rendering
         playback.ts              #   Video playback manager (MoQ → decoder → buffer)
         dissolve.ts              #   WebGPU dissolve renderer + Canvas 2D fallback
@@ -89,11 +96,14 @@ ui/                              # SvelteKit frontend (Svelte 5 + TypeScript)
       SourceTile.svelte          #   Single source button with tally color + canvas
       AudioMixer.svelte          #   Channel strips: faders, VU meters, PFL/MUTE/AFV
       KeyboardOverlay.svelte     #   Keyboard shortcut reference (press ?)
-      OutputControls.svelte        #   Header: REC button + SRT status indicator
+      OutputControls.svelte        #   Header: REC button + SRT status + MODE toggle
       RecordingControl.svelte      #   Recording start/stop/status
       SRTOutputModal.svelte        #   SRT configuration modal
+      SimpleMode.svelte            #   Volunteer-friendly layout (CUT/DISSOLVE + sources)
+    lib/layout/                    # Layout mode management
+      preferences.ts             #   URL param + localStorage detection/persistence
     routes/
-      +page.svelte               #   Traditional broadcast layout
+      +page.svelte               #   Layout switcher (traditional/simple) + media pipeline
       +layout.svelte             #   Root layout (CSS import)
       +layout.ts                 #   SPA mode (no SSR, no prerender)
 docs/
@@ -105,6 +115,9 @@ charter.md                       # Project charter (vision, architecture, pricin
 phase0-findings.md               # Phase 0 research synthesis (15 areas)
 phase0-research.md               # Original research task list
 competitive-analysis.md          # 15 competitors analyzed
+Makefile                         # Build chain: dev, build, docker, test-all, clean
+Dockerfile                       # Multi-stage build (UI → Go → runtime)
+.github/workflows/ci.yml         # GitHub Actions: lint, test-go, test-ui, docker
 research/                        # Detailed research by topic
   browser-capabilities.md        #   Keyboard, WebGPU dissolve, tally borders
   deployment-infrastructure.md   #   Hosting comparison (Hetzner wins)
@@ -120,12 +133,12 @@ research/                        # Detailed research by topic
 4. **`phase0-findings.md`** — research context (skim sections relevant to your task)
 5. **`charter.md`** — full vision (read if you need business/UX context)
 
-## Current State (Phase 5 Complete)
+## Current State (MVP Complete — Phases 1-5 + Polish)
 
-- **Branch:** `phase5-recording-srt` (18 commits ahead of phase4-dissolve-transitions)
-- **Tests:** 334 Go tests + 123 Vitest tests + 22 E2E tests passing with `-race`
-- **What works:** Everything from Phases 1-4 + program recording (MPEG-TS), SRT output (caller push + listener pull), shared codec package (AVC1↔Annex B, ADTS), OutputManager with auto-start/stop muxer, ring buffer for SRT reconnection, exponential backoff, RecordingControl + SRTOutputModal browser components, OutputControls header
-- **What's stubbed:** Wipe transitions (post-MVP), graphics overlay, FTB reverse toggle, multi-destination SRT (v1.5), ISO per-source recording (v2.5)
+- **Branch:** `main`
+- **Tests:** 357 Go tests + 176 Vitest tests + 39 E2E tests passing with `-race`
+- **What works:** Everything from Phases 1-5 + Simple Mode (volunteer-friendly layout), video/audio playback pipeline (MoQ → decoder → canvas), PFL audio decode + metering, FTB reverse toggle (smooth fade-in), recording file rotation (time + size), SRT wired to real zsiec/srtgo (pure Go), ring buffer overflow monitoring with reconnect callback, static file embedding (single binary), Dockerfile (multi-stage), GitHub Actions CI, Makefile with dev/build/docker/test targets, `make demo` with 4 simulated cameras (`--demo` flag)
+- **What's stubbed:** Wipe transitions (post-MVP), graphics overlay, multi-destination SRT (v1.5), ISO per-source recording (v2.5), WebGPU dissolve (Canvas 2D fallback works)
 
 ## Key Architecture Decisions
 
@@ -155,10 +168,17 @@ research/                        # Detailed research by topic
 - **Output lifecycle:** OutputManager auto-registers viewer on program relay when first output starts, removes when last stops. Zero CPU when inactive.
 - **SRT reconnection:** Exponential backoff (1s->30s) with 4MB ring buffer. Resume from keyframe if overflow.
 - **Shared codec:** `server/codec/` package used by transition pipeline AND output muxer for AVC1<->Annex B.
+- **Simple Mode:** Volunteer-friendly layout with just preview/program + source buttons + CUT/DISSOLVE. Layout mode detected from URL param (`?mode=simple`) > localStorage > default 'traditional'. Auto-persists URL param to localStorage.
+- **Media pipeline:** Per-source MoQTransport → PrismVideoDecoder → VideoRenderBuffer → PrismRenderer (rAF loop). Audio via PrismAudioDecoder with AudioContext for PFL/metering.
+- **FTB reverse:** Smooth fade-in from black using inverted blend position (`1.0 - pos`). New `TransitionFTBReverse` type.
+- **Recording rotation:** Time-based (default 1h) and size-based. Sequential naming `program_YYYYMMDD_HHMMSS_NNN.ts`.
+- **SRT wiring:** Function injection pattern — `srt_wire.go` provides real `srt.Dial()`/`srt.Listen()` wrappers, injected into OutputManager from `main.go`. Uses `zsiec/srtgo` (pure Go, no cgo).
+- **Ring buffer overflow:** `onReconnect(overflowed bool)` callback on SRTCaller. OutputManager logs warning and broadcasts state on overflow.
+- **Static file embedding:** Build tags (`embed_ui` / `!embed_ui`) with symlink for `//go:embed`. SPA file server with immutable cache headers for `/_app/immutable/*`.
 
 ## Prism Dependency
 
-Prism lives at `/Users/zsiec/dev/prism` and is referenced via `replace` directive in `server/go.mod`. One commit was added to Prism: `ExtraRoutes` field in `ServerConfig` + call in `registerAPIRoutes`.
+Prism is published as `github.com/zsiec/prism v0.1.1` (includes `ExtraRoutes` field in `ServerConfig`). SRT is `github.com/zsiec/srtgo v0.2.4`. No local `replace` directives — all dependencies resolve from the Go module proxy.
 
 Key Prism interfaces used:
 - `distribution.Viewer` — `ID()`, `SendVideo()`, `SendAudio()`, `SendCaptions()`, `Stats()`
