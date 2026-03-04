@@ -79,8 +79,8 @@ research/                        # Detailed research by topic
 
 ## Current State (Phase 2 Complete)
 
-- **Branch:** `phase2-browser-ui` (16 commits ahead of phase1-server-switcher)
-- **Tests:** 42 Go tests + 20 Vitest tests + 2 E2E tests passing with `-race`
+- **Branch:** `phase2-browser-ui` (17 commits ahead of phase1-server-switcher)
+- **Tests:** 48 Go tests + 25 Vitest tests + 2 E2E tests passing with `-race`
 - **What works:** Everything from Phase 1 + source labels, proactive health broadcast, fan-out state callbacks, SvelteKit UI with traditional broadcast layout, keyboard shortcuts, REST API client, control room state store, WebGPU tally borders, MoQ control track (server + browser), Prism server integration
 - **What's stubbed:** Transition endpoint still returns 501, MoQ video playback (transport vendored but video rendering not wired), WebTransport connection (REST polling fallback active)
 
