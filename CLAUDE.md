@@ -8,6 +8,11 @@ Browser-based live video switcher built on [Prism](https://github.com/zsiec/pris
 cd server && go build ./cmd/switchframe    # build
 cd server && go test ./... -race           # test
 make build                                 # build to bin/switchframe
+cd ui && npm install                       # install UI deps
+cd ui && npm run dev                       # dev server (proxies to Go)
+cd ui && npx vitest run                    # frontend tests
+cd ui && npx playwright test               # E2E tests
+make test-all                              # run all tests
 ```
 
 ## Repository Layout
@@ -25,6 +30,29 @@ server/                          # Go module (github.com/zsiec/switchframe/serve
     state.go                     #   StatePublisher (JSON serialize -> callback)
   internal/                      # Shared types
     types.go                     #   ControlRoomState, SourceInfo, TallyStatus, SourceHealthStatus
+ui/                              # SvelteKit frontend (Svelte 5 + TypeScript)
+  src/
+    lib/
+      prism/                     # Vendored Prism TS modules (transport, decode, render)
+      api/                       # REST API client + TypeScript types
+        types.ts                 #   ControlRoomState, SourceInfo, TallyStatus types
+        switch-api.ts            #   cut(), setPreview(), setLabel(), getState()
+      state/                     # Reactive state management
+        control-room.svelte.ts   #   Svelte 5 $state store with MoQ update handler
+      keyboard/                  # Keyboard shortcut handler
+        handler.ts               #   Capture-phase keydown with event.code
+    components/                  # Svelte UI components
+      Multiview.svelte           #   Source tile grid with tally outlines
+      ProgramPreview.svelte      #   Large preview/program windows
+      PreviewBus.svelte          #   Green preview source buttons
+      ProgramBus.svelte          #   Red program source buttons
+      TransitionControls.svelte  #   CUT / AUTO / FTB buttons
+      SourceTile.svelte          #   Single source button with tally color
+      KeyboardOverlay.svelte     #   Keyboard shortcut reference (press ?)
+    routes/
+      +page.svelte               #   Traditional broadcast layout
+      +layout.svelte             #   Root layout (CSS import)
+      +layout.ts                 #   SPA mode (no SSR, no prerender)
 docs/
   plans/
     2026-03-03-mvp-design.md     # Approved MVP design (Phases 1-5)
@@ -49,12 +77,12 @@ research/                        # Detailed research by topic
 4. **`phase0-findings.md`** — research context (skim sections relevant to your task)
 5. **`charter.md`** — full vision (read if you need business/UX context)
 
-## Current State (Phase 1 Complete)
+## Current State (Phase 2 Complete)
 
-- **Branch:** `phase1-server-switcher` (11 commits ahead of main)
-- **Tests:** 33 passing with `-race`
-- **What works:** Register sources, cut between them (keyframe-gated), audio-follows-video, REST API, health monitoring, state broadcast via callback
-- **What's stubbed:** Transition endpoint returns 501, MoQ state publisher uses debug log callback, main.go runs standalone HTTP (not wired to Prism server)
+- **Branch:** `phase2-browser-ui` (14 commits ahead of phase1-server-switcher)
+- **Tests:** 42 Go tests + 20 Vitest tests + 2 E2E tests passing with `-race`
+- **What works:** Everything from Phase 1 + source labels, proactive health broadcast, fan-out state callbacks, SvelteKit UI with traditional broadcast layout, keyboard shortcuts, REST API client, control room state store, WebGPU tally borders, MoQ control track (server + browser), Prism server integration
+- **What's stubbed:** Transition endpoint still returns 501, MoQ video playback (transport vendored but video rendering not wired), WebTransport connection (REST polling fallback active)
 
 ## Key Architecture Decisions
 
@@ -63,6 +91,11 @@ research/                        # Detailed research by topic
 - **Frame routing:** Per-source `sourceViewer` implements `distribution.Viewer`, tags frames with source key. Switcher forwards only program source's frames to program Relay.
 - **Keyframe gating:** After a cut, video+audio are gated until first IDR from new source to prevent decoder artifacts.
 - **Prism extension:** `ServerConfig.ExtraRoutes` added to Prism for mounting Switchframe's REST API on Prism's mux.
+- **Frontend:** Svelte 5 + SvelteKit with static adapter (for Go binary embed)
+- **Vendored Prism TS:** Transport, decode, render modules copied to ui/src/lib/prism/ for full control
+- **State sync:** MoQ "control" track (event-driven) with REST polling fallback
+- **Keyboard:** Capture-phase `keydown` with `event.code` for layout-independent shortcuts
+- **Tally rendering:** WebGPU fragment shader border + CSS outline fallback
 
 ## Prism Dependency
 
