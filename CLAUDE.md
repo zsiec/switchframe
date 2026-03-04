@@ -21,33 +21,48 @@ make test-all                              # run all tests
 server/                          # Go module (github.com/zsiec/switchframe/server)
   cmd/switchframe/main.go        # Binary entry point (standalone HTTP on :8080)
   switcher/                      # Core switching engine
-    switcher.go                  #   State machine: Cut(), SetPreview(), frame routing
+    switcher.go                  #   State machine: Cut(), SetPreview(), frame routing, audio handler
     source_viewer.go             #   Per-source Viewer proxy (tags frames with source key)
     health.go                    #   Source health monitor (stale/no_signal/offline)
-    integration_test.go          #   End-to-end tests: source relay -> switcher -> program relay
+    integration_test.go          #   End-to-end tests: source relay -> switcher -> program relay + audio
+  audio/                         # Audio mixing engine
+    mixer.go                     #   Per-channel decode/mix/encode, passthrough optimization
+    codec.go                     #   AudioDecoder/AudioEncoder interfaces + factory types
+    fdk_cgo.go                   #   Centralized cgo CFLAGS/LDFLAGS for fdk-aac
+    fdk_decoder.go               #   FDK AAC decoder (direct cgo wrapper)
+    fdk_encoder.go               #   FDK AAC encoder (direct cgo wrapper)
+    crossfade.go                 #   Equal-power cos/sin ramp
+    metering.go                  #   Peak level computation + LinearToDBFS
   control/                       # REST API + state broadcast
-    api.go                       #   HTTP handlers: POST /api/switch/cut, /preview, GET /state, /sources
+    api.go                       #   HTTP handlers: cut, preview, state, sources, audio level/mute/AFV/master
     state.go                     #   StatePublisher (JSON serialize -> callback)
   internal/                      # Shared types
-    types.go                     #   ControlRoomState, SourceInfo, TallyStatus, SourceHealthStatus
+    types.go                     #   ControlRoomState, SourceInfo, TallyStatus, AudioChannel
 ui/                              # SvelteKit frontend (Svelte 5 + TypeScript)
   src/
     lib/
       prism/                     # Vendored Prism TS modules (transport, decode, render)
       api/                       # REST API client + TypeScript types
-        types.ts                 #   ControlRoomState, SourceInfo, TallyStatus types
-        switch-api.ts            #   cut(), setPreview(), setLabel(), getState()
+        types.ts                 #   ControlRoomState, SourceInfo, TallyStatus, AudioChannel types
+        switch-api.ts            #   cut(), setPreview(), setLabel(), getState(), setLevel/Mute/AFV/Master
       state/                     # Reactive state management
         control-room.svelte.ts   #   Svelte 5 $state store with MoQ update handler
       keyboard/                  # Keyboard shortcut handler
         handler.ts               #   Capture-phase keydown with event.code
+      transport/                 # WebTransport connection management
+        connection.ts            #   Auto-retry WebTransport with REST polling fallback
+      video/                     # Video playback
+        playback.ts              #   Video playback manager (MoQ → decoder → buffer)
+      audio/                     # Client-side audio
+        pfl.ts                   #   PFL manager (per-source solo monitoring)
     components/                  # Svelte UI components
-      Multiview.svelte           #   Source tile grid with tally outlines
-      ProgramPreview.svelte      #   Large preview/program windows
+      Multiview.svelte           #   Source tile grid with tally outlines + canvas
+      ProgramPreview.svelte      #   Large preview/program windows with canvas
       PreviewBus.svelte          #   Green preview source buttons
       ProgramBus.svelte          #   Red program source buttons
       TransitionControls.svelte  #   CUT / AUTO / FTB buttons
-      SourceTile.svelte          #   Single source button with tally color
+      SourceTile.svelte          #   Single source button with tally color + canvas
+      AudioMixer.svelte          #   Channel strips: faders, VU meters, PFL/MUTE/AFV
       KeyboardOverlay.svelte     #   Keyboard shortcut reference (press ?)
     routes/
       +page.svelte               #   Traditional broadcast layout
@@ -77,12 +92,12 @@ research/                        # Detailed research by topic
 4. **`phase0-findings.md`** — research context (skim sections relevant to your task)
 5. **`charter.md`** — full vision (read if you need business/UX context)
 
-## Current State (Phase 2 Complete)
+## Current State (Phase 3 Complete)
 
-- **Branch:** `phase2-browser-ui` (17 commits ahead of phase1-server-switcher)
-- **Tests:** 48 Go tests + 25 Vitest tests + 2 E2E tests passing with `-race`
-- **What works:** Everything from Phase 1 + source labels, proactive health broadcast, fan-out state callbacks, SvelteKit UI with traditional broadcast layout, keyboard shortcuts, REST API client, control room state store, WebGPU tally borders, MoQ control track (server + browser), Prism server integration
-- **What's stubbed:** Transition endpoint still returns 501, MoQ video playback (transport vendored but video rendering not wired), WebTransport connection (REST polling fallback active)
+- **Branch:** `phase3-video-audio` (34 commits ahead of phase2-browser-ui)
+- **Tests:** 118 Go tests + 66 Vitest tests + 15 E2E tests passing with `-race`
+- **What works:** Everything from Phases 1-2 + live MoQ video in multiview tiles and program/preview windows, server-side audio mixer with passthrough optimization, FDK AAC decode/encode via cgo, per-channel level/mute/AFV, equal-power crossfade on cut, PFL monitoring, VU metering, audio REST API, WebTransport connection manager with REST polling fallback, AudioMixer UI with channel strips and faders
+- **What's stubbed:** Dissolve/wipe transitions (Phase 4), recording/SRT output (Phase 5), graphics overlay
 
 ## Key Architecture Decisions
 
@@ -96,6 +111,11 @@ research/                        # Detailed research by topic
 - **State sync:** MoQ "control" track (event-driven) with REST polling fallback
 - **Keyboard:** Capture-phase `keydown` with `event.code` for layout-independent shortcuts
 - **Tally rendering:** WebGPU fragment shader border + CSS outline fallback
+- **Audio mixing:** Server-side FDK AAC decode/mix/encode with passthrough optimization (zero CPU when single source at 0dB)
+- **Crossfade:** Equal-power cos/sin ramp, 1 AAC frame (~23ms), triggered on cut
+- **PFL:** Client-side only, per-operator, no server involvement
+- **Program relay bridge:** Use `server.RegisterStream("program")` relay directly (zero extra Prism changes)
+- **AFV wiring:** State callback triggers `mixer.OnProgramChange` before state broadcast to browsers
 
 ## Prism Dependency
 
