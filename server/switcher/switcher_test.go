@@ -1,0 +1,312 @@
+package switcher
+
+import (
+	"sync"
+	"testing"
+
+	"github.com/zsiec/ccx"
+	"github.com/zsiec/prism/distribution"
+	"github.com/zsiec/prism/media"
+	"github.com/zsiec/switchframe/server/internal"
+)
+
+func newTestRelay() *distribution.Relay {
+	return distribution.NewRelay()
+}
+
+// mockProgramViewer captures frames from the program relay.
+type mockProgramViewer struct {
+	id     string
+	mu     sync.Mutex
+	videos []*media.VideoFrame
+	audios []*media.AudioFrame
+}
+
+func newMockProgramViewer(id string) *mockProgramViewer {
+	return &mockProgramViewer{id: id}
+}
+
+func (m *mockProgramViewer) ID() string { return m.id }
+
+func (m *mockProgramViewer) SendVideo(frame *media.VideoFrame) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.videos = append(m.videos, frame)
+}
+
+func (m *mockProgramViewer) SendAudio(frame *media.AudioFrame) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.audios = append(m.audios, frame)
+}
+
+func (m *mockProgramViewer) SendCaptions(_ *ccx.CaptionFrame) {}
+
+func (m *mockProgramViewer) Stats() distribution.ViewerStats {
+	return distribution.ViewerStats{ID: m.id}
+}
+
+func TestNewSwitcher(t *testing.T) {
+	programRelay := newTestRelay()
+	sw := New(programRelay)
+	if sw == nil {
+		t.Fatal("New() returned nil")
+	}
+	state := sw.State()
+	if state.ProgramSource != "" {
+		t.Errorf("ProgramSource = %q, want empty", state.ProgramSource)
+	}
+	if state.PreviewSource != "" {
+		t.Errorf("PreviewSource = %q, want empty", state.PreviewSource)
+	}
+	if state.TransitionType != "cut" {
+		t.Errorf("TransitionType = %q, want %q", state.TransitionType, "cut")
+	}
+	if len(state.Sources) != 0 {
+		t.Errorf("Sources has %d entries, want 0", len(state.Sources))
+	}
+}
+
+func TestRegisterSource(t *testing.T) {
+	programRelay := newTestRelay()
+	sw := New(programRelay)
+	cam1Relay := newTestRelay()
+
+	sw.RegisterSource("camera1", cam1Relay)
+
+	state := sw.State()
+	if len(state.Sources) != 1 {
+		t.Fatalf("Sources has %d entries, want 1", len(state.Sources))
+	}
+	src, ok := state.Sources["camera1"]
+	if !ok {
+		t.Fatal("Sources missing 'camera1'")
+	}
+	if src.Status != internal.SourceHealthy {
+		t.Errorf("Source status = %q, want %q", src.Status, internal.SourceHealthy)
+	}
+	if src.Key != "camera1" {
+		t.Errorf("Source key = %q, want %q", src.Key, "camera1")
+	}
+}
+
+func TestUnregisterSource(t *testing.T) {
+	programRelay := newTestRelay()
+	sw := New(programRelay)
+	cam1Relay := newTestRelay()
+
+	sw.RegisterSource("camera1", cam1Relay)
+	sw.UnregisterSource("camera1")
+
+	state := sw.State()
+	if len(state.Sources) != 0 {
+		t.Errorf("Sources has %d entries, want 0", len(state.Sources))
+	}
+}
+
+func TestCutToSource(t *testing.T) {
+	programRelay := newTestRelay()
+	sw := New(programRelay)
+	cam1Relay := newTestRelay()
+	sw.RegisterSource("camera1", cam1Relay)
+
+	err := sw.Cut("camera1")
+	if err != nil {
+		t.Fatalf("Cut() error: %v", err)
+	}
+
+	state := sw.State()
+	if state.ProgramSource != "camera1" {
+		t.Errorf("ProgramSource = %q, want %q", state.ProgramSource, "camera1")
+	}
+	if state.TallyState["camera1"] != internal.TallyProgram {
+		t.Errorf("tally[camera1] = %q, want %q", state.TallyState["camera1"], internal.TallyProgram)
+	}
+	if state.Seq != 1 {
+		t.Errorf("Seq = %d, want 1", state.Seq)
+	}
+}
+
+func TestCutSwapsPreview(t *testing.T) {
+	programRelay := newTestRelay()
+	sw := New(programRelay)
+	cam1Relay := newTestRelay()
+	cam2Relay := newTestRelay()
+	sw.RegisterSource("camera1", cam1Relay)
+	sw.RegisterSource("camera2", cam2Relay)
+
+	// Cut to camera1, set preview to camera2, then cut to camera2.
+	if err := sw.Cut("camera1"); err != nil {
+		t.Fatalf("Cut(camera1) error: %v", err)
+	}
+	if err := sw.SetPreview("camera2"); err != nil {
+		t.Fatalf("SetPreview(camera2) error: %v", err)
+	}
+	if err := sw.Cut("camera2"); err != nil {
+		t.Fatalf("Cut(camera2) error: %v", err)
+	}
+
+	state := sw.State()
+	if state.ProgramSource != "camera2" {
+		t.Errorf("ProgramSource = %q, want %q", state.ProgramSource, "camera2")
+	}
+	if state.PreviewSource != "camera1" {
+		t.Errorf("PreviewSource = %q, want %q", state.PreviewSource, "camera1")
+	}
+}
+
+func TestCutToMissingSourceErrors(t *testing.T) {
+	programRelay := newTestRelay()
+	sw := New(programRelay)
+
+	err := sw.Cut("nonexistent")
+	if err == nil {
+		t.Fatal("Cut(nonexistent) should return error")
+	}
+}
+
+func TestCutToCurrentProgramIsNoop(t *testing.T) {
+	programRelay := newTestRelay()
+	sw := New(programRelay)
+	cam1Relay := newTestRelay()
+	sw.RegisterSource("camera1", cam1Relay)
+
+	if err := sw.Cut("camera1"); err != nil {
+		t.Fatalf("Cut() error: %v", err)
+	}
+	seqAfterFirst := sw.State().Seq
+
+	// Second cut to the same source should be a no-op.
+	if err := sw.Cut("camera1"); err != nil {
+		t.Fatalf("Cut() error: %v", err)
+	}
+	seqAfterSecond := sw.State().Seq
+
+	if seqAfterSecond != seqAfterFirst {
+		t.Errorf("Seq changed from %d to %d; want no change", seqAfterFirst, seqAfterSecond)
+	}
+}
+
+func TestSetPreview(t *testing.T) {
+	programRelay := newTestRelay()
+	sw := New(programRelay)
+	cam1Relay := newTestRelay()
+	sw.RegisterSource("camera1", cam1Relay)
+
+	err := sw.SetPreview("camera1")
+	if err != nil {
+		t.Fatalf("SetPreview() error: %v", err)
+	}
+
+	state := sw.State()
+	if state.PreviewSource != "camera1" {
+		t.Errorf("PreviewSource = %q, want %q", state.PreviewSource, "camera1")
+	}
+	if state.TallyState["camera1"] != internal.TallyPreview {
+		t.Errorf("tally[camera1] = %q, want %q", state.TallyState["camera1"], internal.TallyPreview)
+	}
+}
+
+func TestSetPreviewMissingSourceErrors(t *testing.T) {
+	programRelay := newTestRelay()
+	sw := New(programRelay)
+
+	err := sw.SetPreview("nonexistent")
+	if err == nil {
+		t.Fatal("SetPreview(nonexistent) should return error")
+	}
+}
+
+func TestFrameForwarding(t *testing.T) {
+	programRelay := newTestRelay()
+	sw := New(programRelay)
+
+	// Attach a mock viewer to the program relay to capture output.
+	viewer := newMockProgramViewer("test-viewer")
+	programRelay.AddViewer(viewer)
+
+	cam1Relay := newTestRelay()
+	cam2Relay := newTestRelay()
+	sw.RegisterSource("camera1", cam1Relay)
+	sw.RegisterSource("camera2", cam2Relay)
+
+	// Cut to camera1.
+	if err := sw.Cut("camera1"); err != nil {
+		t.Fatalf("Cut() error: %v", err)
+	}
+
+	// Broadcast a video frame on camera1's relay -- should reach the viewer.
+	cam1Frame := &media.VideoFrame{PTS: 1000, IsKeyframe: true}
+	cam1Relay.BroadcastVideo(cam1Frame)
+
+	// Broadcast a video frame on camera2's relay -- should NOT reach the viewer.
+	cam2Frame := &media.VideoFrame{PTS: 2000, IsKeyframe: true}
+	cam2Relay.BroadcastVideo(cam2Frame)
+
+	viewer.mu.Lock()
+	defer viewer.mu.Unlock()
+
+	if len(viewer.videos) != 1 {
+		t.Fatalf("got %d video frames, want 1", len(viewer.videos))
+	}
+	if viewer.videos[0].PTS != 1000 {
+		t.Errorf("forwarded frame PTS = %d, want 1000", viewer.videos[0].PTS)
+	}
+}
+
+func TestAudioFrameForwarding(t *testing.T) {
+	programRelay := newTestRelay()
+	sw := New(programRelay)
+
+	viewer := newMockProgramViewer("test-viewer")
+	programRelay.AddViewer(viewer)
+
+	cam1Relay := newTestRelay()
+	cam2Relay := newTestRelay()
+	sw.RegisterSource("camera1", cam1Relay)
+	sw.RegisterSource("camera2", cam2Relay)
+
+	if err := sw.Cut("camera1"); err != nil {
+		t.Fatalf("Cut() error: %v", err)
+	}
+
+	// Audio from program source should be forwarded.
+	cam1Audio := &media.AudioFrame{PTS: 500, Data: []byte{0xAA}}
+	cam1Relay.BroadcastAudio(cam1Audio)
+
+	// Audio from non-program source should be dropped.
+	cam2Audio := &media.AudioFrame{PTS: 600, Data: []byte{0xBB}}
+	cam2Relay.BroadcastAudio(cam2Audio)
+
+	viewer.mu.Lock()
+	defer viewer.mu.Unlock()
+
+	if len(viewer.audios) != 1 {
+		t.Fatalf("got %d audio frames, want 1", len(viewer.audios))
+	}
+	if viewer.audios[0].PTS != 500 {
+		t.Errorf("forwarded audio PTS = %d, want 500", viewer.audios[0].PTS)
+	}
+}
+
+func TestSourceKeys(t *testing.T) {
+	programRelay := newTestRelay()
+	sw := New(programRelay)
+	cam1Relay := newTestRelay()
+	cam2Relay := newTestRelay()
+	sw.RegisterSource("camera1", cam1Relay)
+	sw.RegisterSource("camera2", cam2Relay)
+
+	keys := sw.SourceKeys()
+	if len(keys) != 2 {
+		t.Fatalf("SourceKeys() returned %d keys, want 2", len(keys))
+	}
+
+	keySet := make(map[string]bool)
+	for _, k := range keys {
+		keySet[k] = true
+	}
+	if !keySet["camera1"] || !keySet["camera2"] {
+		t.Errorf("SourceKeys() = %v, want [camera1, camera2]", keys)
+	}
+}
