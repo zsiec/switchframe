@@ -111,6 +111,9 @@ func TestIntegrationAudioFollowsVideo(t *testing.T) {
 		t.Fatalf("Cut(camera1): %v", err)
 	}
 
+	// Send a keyframe to clear the IDR gate.
+	cam1Relay.BroadcastVideo(&media.VideoFrame{PTS: 50, IsKeyframe: true})
+
 	// Send audio from camera1 -- should forward.
 	audio1 := &media.AudioFrame{PTS: 100, Data: []byte{0xAA}, SampleRate: 48000, Channels: 2}
 	cam1Relay.BroadcastAudio(audio1)

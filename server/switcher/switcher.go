@@ -15,9 +15,10 @@ import (
 
 // sourceState tracks a registered source and its Relay/viewer pair.
 type sourceState struct {
-	key    string
-	relay  *distribution.Relay
-	viewer *sourceViewer
+	key        string
+	relay      *distribution.Relay
+	viewer     *sourceViewer
+	pendingIDR bool // true after a cut until first keyframe from this source
 }
 
 // Switcher is the central switching engine. It manages which source is
@@ -44,9 +45,9 @@ func New(programRelay *distribution.Relay) *Switcher {
 	}
 }
 
-// OnStateChange registers a callback that is invoked (under lock) whenever
-// the switcher state changes. This is used to push state updates to the
-// MoQ control track.
+// OnStateChange registers a callback invoked whenever the switcher state
+// changes. The callback is called outside the lock so it may safely perform
+// slow operations (JSON marshal, network I/O).
 func (s *Switcher) OnStateChange(cb func(internal.ControlRoomState)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -89,34 +90,46 @@ func (s *Switcher) UnregisterSource(key string) {
 // The previous program source is automatically moved to preview. If the
 // source is already on program, Cut is a no-op (Seq is not incremented).
 func (s *Switcher) Cut(sourceKey string) error {
+	var snapshot internal.ControlRoomState
+	changed := false
+
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if _, ok := s.sources[sourceKey]; !ok {
+		s.mu.Unlock()
 		return fmt.Errorf("source %q not found", sourceKey)
 	}
-	if s.programSource == sourceKey {
-		return nil // already on program — no-op
+	if s.programSource != sourceKey {
+		oldProgram := s.programSource
+		s.programSource = sourceKey
+		s.sources[sourceKey].pendingIDR = true
+		if oldProgram != "" {
+			s.previewSource = oldProgram
+		}
+		s.seq++
+		snapshot = s.buildStateLocked()
+		changed = true
 	}
-	oldProgram := s.programSource
-	s.programSource = sourceKey
-	if oldProgram != "" {
-		s.previewSource = oldProgram
+	s.mu.Unlock()
+
+	if changed {
+		s.notifyStateChange(snapshot)
 	}
-	s.seq++
-	s.notifyStateChange()
 	return nil
 }
 
 // SetPreview sets the preview source. This does not affect the program output.
 func (s *Switcher) SetPreview(sourceKey string) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if _, ok := s.sources[sourceKey]; !ok {
+		s.mu.Unlock()
 		return fmt.Errorf("source %q not found", sourceKey)
 	}
 	s.previewSource = sourceKey
 	s.seq++
-	s.notifyStateChange()
+	snapshot := s.buildStateLocked()
+	s.mu.Unlock()
+
+	s.notifyStateChange(snapshot)
 	return nil
 }
 
@@ -164,36 +177,47 @@ func (s *Switcher) buildStateLocked() internal.ControlRoomState {
 	}
 }
 
-// notifyStateChange calls the registered state callback, if any. Caller
-// must hold s.mu (write lock).
-func (s *Switcher) notifyStateChange() {
+// notifyStateChange calls the registered state callback, if any.
+// Must be called WITHOUT holding s.mu to avoid blocking frame handlers.
+func (s *Switcher) notifyStateChange(snapshot internal.ControlRoomState) {
 	if s.stateCallback != nil {
-		s.stateCallback(s.buildStateLocked())
+		s.stateCallback(snapshot)
 	}
 }
 
 // handleVideoFrame implements frameHandler. It is called by sourceViewers
 // when a video frame arrives from a source. Only frames from the current
-// program source are forwarded to the program Relay.
+// program source are forwarded to the program Relay. After a cut, frames
+// are gated until the first keyframe (IDR) to prevent decoder artifacts.
 func (s *Switcher) handleVideoFrame(sourceKey string, frame *media.VideoFrame) {
-	s.mu.RLock()
-	isProgram := s.programSource == sourceKey
-	s.mu.RUnlock()
-	if !isProgram {
+	s.mu.Lock()
+	ss, ok := s.sources[sourceKey]
+	if !ok || s.programSource != sourceKey {
+		s.mu.Unlock()
 		return
 	}
+	if ss.pendingIDR {
+		if !frame.IsKeyframe {
+			s.mu.Unlock()
+			return
+		}
+		ss.pendingIDR = false
+	}
+	s.mu.Unlock()
 	s.programRelay.BroadcastVideo(frame)
 }
 
 // handleAudioFrame implements frameHandler. It is called by sourceViewers
 // when an audio frame arrives from a source. Only frames from the current
-// program source are forwarded to the program Relay.
+// program source are forwarded to the program Relay. Audio is gated along
+// with video until the first keyframe after a cut.
 func (s *Switcher) handleAudioFrame(sourceKey string, frame *media.AudioFrame) {
 	s.mu.RLock()
-	isProgram := s.programSource == sourceKey
-	s.mu.RUnlock()
-	if !isProgram {
+	ss, ok := s.sources[sourceKey]
+	if !ok || s.programSource != sourceKey || ss.pendingIDR {
+		s.mu.RUnlock()
 		return
 	}
+	s.mu.RUnlock()
 	s.programRelay.BroadcastAudio(frame)
 }

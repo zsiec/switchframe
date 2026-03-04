@@ -270,6 +270,9 @@ func TestAudioFrameForwarding(t *testing.T) {
 		t.Fatalf("Cut() error: %v", err)
 	}
 
+	// Send a keyframe to clear the IDR gate.
+	cam1Relay.BroadcastVideo(&media.VideoFrame{PTS: 100, IsKeyframe: true})
+
 	// Audio from program source should be forwarded.
 	cam1Audio := &media.AudioFrame{PTS: 500, Data: []byte{0xAA}}
 	cam1Relay.BroadcastAudio(cam1Audio)
@@ -286,6 +289,90 @@ func TestAudioFrameForwarding(t *testing.T) {
 	}
 	if viewer.audios[0].PTS != 500 {
 		t.Errorf("forwarded audio PTS = %d, want 500", viewer.audios[0].PTS)
+	}
+}
+
+func TestCutGatesUntilKeyframe(t *testing.T) {
+	programRelay := newTestRelay()
+	sw := New(programRelay)
+
+	viewer := newMockProgramViewer("test-viewer")
+	programRelay.AddViewer(viewer)
+
+	cam1Relay := newTestRelay()
+	cam2Relay := newTestRelay()
+	sw.RegisterSource("camera1", cam1Relay)
+	sw.RegisterSource("camera2", cam2Relay)
+
+	// Cut to camera1, send a keyframe to establish it.
+	sw.Cut("camera1")
+	cam1Relay.BroadcastVideo(&media.VideoFrame{PTS: 100, IsKeyframe: true})
+
+	// Cut to camera2.
+	sw.Cut("camera2")
+
+	// Send P-frame from camera2 — should be DROPPED (no keyframe yet).
+	cam2Relay.BroadcastVideo(&media.VideoFrame{PTS: 200, IsKeyframe: false})
+
+	// Send keyframe from camera2 — should be forwarded.
+	cam2Relay.BroadcastVideo(&media.VideoFrame{PTS: 300, IsKeyframe: true})
+
+	// Send P-frame from camera2 — should be forwarded (keyframe was seen).
+	cam2Relay.BroadcastVideo(&media.VideoFrame{PTS: 400, IsKeyframe: false})
+
+	viewer.mu.Lock()
+	defer viewer.mu.Unlock()
+
+	// Should have: cam1 keyframe(100) + cam2 keyframe(300) + cam2 P-frame(400) = 3
+	if len(viewer.videos) != 3 {
+		t.Fatalf("got %d video frames, want 3", len(viewer.videos))
+	}
+	if viewer.videos[0].PTS != 100 {
+		t.Errorf("frame[0] PTS = %d, want 100", viewer.videos[0].PTS)
+	}
+	if viewer.videos[1].PTS != 300 {
+		t.Errorf("frame[1] PTS = %d, want 300", viewer.videos[1].PTS)
+	}
+	if viewer.videos[2].PTS != 400 {
+		t.Errorf("frame[2] PTS = %d, want 400", viewer.videos[2].PTS)
+	}
+}
+
+func TestCutAudioGatedUntilVideoKeyframe(t *testing.T) {
+	programRelay := newTestRelay()
+	sw := New(programRelay)
+
+	viewer := newMockProgramViewer("test-viewer")
+	programRelay.AddViewer(viewer)
+
+	cam1Relay := newTestRelay()
+	cam2Relay := newTestRelay()
+	sw.RegisterSource("camera1", cam1Relay)
+	sw.RegisterSource("camera2", cam2Relay)
+
+	sw.Cut("camera1")
+	cam1Relay.BroadcastVideo(&media.VideoFrame{PTS: 100, IsKeyframe: true})
+
+	// Cut to camera2.
+	sw.Cut("camera2")
+
+	// Audio from camera2 before video keyframe — should be DROPPED.
+	cam2Relay.BroadcastAudio(&media.AudioFrame{PTS: 200, Data: []byte{0xAA}})
+
+	// Video keyframe from camera2 — clears the gate.
+	cam2Relay.BroadcastVideo(&media.VideoFrame{PTS: 300, IsKeyframe: true})
+
+	// Audio from camera2 after keyframe — should be forwarded.
+	cam2Relay.BroadcastAudio(&media.AudioFrame{PTS: 400, Data: []byte{0xBB}})
+
+	viewer.mu.Lock()
+	defer viewer.mu.Unlock()
+
+	if len(viewer.audios) != 1 {
+		t.Fatalf("got %d audio frames, want 1", len(viewer.audios))
+	}
+	if viewer.audios[0].PTS != 400 {
+		t.Errorf("audio PTS = %d, want 400", viewer.audios[0].PTS)
 	}
 }
 
