@@ -4,7 +4,10 @@ go 1.25.0
 
 replace github.com/zsiec/prism => /Users/zsiec/dev/prism
 
-require github.com/zsiec/prism v0.0.0-20260225052301-e3a5a8630675
+require (
+	github.com/zsiec/ccx v0.2.0
+	github.com/zsiec/prism v0.0.0-20260225052301-e3a5a8630675
+)
 
 require (
 	github.com/go-task/slim-sprig v0.0.0-20230315185526-52ccab3ef572 // indirect
@@ -12,7 +15,6 @@ require (
 	github.com/onsi/ginkgo/v2 v2.12.0 // indirect
 	github.com/quic-go/qpack v0.5.1 // indirect
 	github.com/quic-go/quic-go v0.50.0 // indirect
-	github.com/zsiec/ccx v0.2.0 // indirect
 	go.uber.org/mock v0.5.0 // indirect
 	golang.org/x/crypto v0.42.0 // indirect
 	golang.org/x/exp v0.0.0-20240506185415-9bf2ced13842 // indirect
