@@ -45,9 +45,6 @@ server/                          # Go module (github.com/zsiec/switchframe/serve
     color.go                       #   BT.709 YUV420↔RGB colorspace conversion
     codec.go                       #   VideoDecoder/VideoEncoder interfaces + mocks
     types.go                       #   TransitionType/TransitionState constants
-    openh264_cgo.go                #   Centralized cgo CFLAGS/LDFLAGS for OpenH264
-    openh264_decoder.go            #   OpenH264 H.264 decoder (cgo wrapper)
-    openh264_encoder.go            #   OpenH264 H.264 encoder (cgo wrapper)
   output/                          # Recording + SRT output engine
     manager.go                     #   OutputManager: lifecycle, viewer, fan-out
     muxer.go                       #   TSMuxer: MPEG-TS muxing (go-astits)
@@ -60,7 +57,14 @@ server/                          # Go module (github.com/zsiec/switchframe/serve
     srt_wire.go                    #   Real srtgo connection wrappers
     ringbuf.go                     #   Ring buffer for SRT reconnection
     integration_test.go            #   End-to-end tests
-  codec/                           # Shared NALU + ADTS helpers
+  codec/                           # Video codec infrastructure + NALU/ADTS helpers
+    ffmpeg_cgo.go                  #   FFmpeg cgo CFLAGS/LDFLAGS (libavcodec/libavutil)
+    ffmpeg_encoder.go              #   FFmpegEncoder (x264/NVENC/VA-API/VideoToolbox)
+    ffmpeg_decoder.go              #   FFmpegDecoder (H.264 software + HW)
+    probe.go                       #   ProbeEncoders() startup auto-detection
+    video.go                       #   NewVideoEncoder/NewVideoDecoder unified factories
+    openh264_encoder.go            #   OpenH264 fallback encoder (build tag: openh264)
+    openh264_decoder.go            #   OpenH264 fallback decoder (build tag: openh264)
     nalu.go                        #   AVC1↔Annex B conversion
     adts.go                        #   ADTS header construction
   demo/                            # Simulated camera sources for demo mode
@@ -157,7 +161,7 @@ research/                        # Detailed research by topic
 - **PFL:** Client-side only, per-operator, no server involvement
 - **Program relay bridge:** Use `server.RegisterStream("program")` relay directly (zero extra Prism changes)
 - **AFV wiring:** State callback triggers `mixer.OnProgramChange` before state broadcast to browsers
-- **Dissolve transitions:** Server-side OpenH264 decode → YUV420 blend → encode. Returns to zero-CPU passthrough between transitions.
+- **Dissolve transitions:** Server-side FFmpeg decode → YUV420 blend → encode (High profile, medium preset). Returns to zero-CPU passthrough between transitions.
 - **Transition engine:** Created per-transition, destroyed on complete/abort. Wall-clock frame pairing with smoothstep easing, output driven by incoming source. Encoder bitrate/fps derived from source stream statistics.
 - **Blend colorspace:** YUV420 (BT.709 domain) matching hardware broadcast mixers (ATEM, Ross). Avoids costly YUV↔RGB round-trip.
 - **T-bar control:** Throttled REST position updates (50ms/20Hz). HTTP/3 multiplexed on shared QUIC connection.
@@ -167,7 +171,7 @@ research/                        # Detailed research by topic
 - **SRT modes:** Both caller (push to platform) and listener (accept N pulls, max 8). srtgo is pure Go (no cgo).
 - **Output lifecycle:** OutputManager auto-registers viewer on program relay when first output starts, removes when last stops. Zero CPU when inactive.
 - **SRT reconnection:** Exponential backoff (1s->30s) with 4MB ring buffer. Resume from keyframe if overflow.
-- **Shared codec:** `server/codec/` package used by transition pipeline AND output muxer for AVC1<->Annex B.
+- **Shared codec:** `server/codec/` package: FFmpeg libavcodec cgo bindings (encoder + decoder), startup probe auto-detects best encoder (NVENC → VA-API → VideoToolbox → libx264 → OpenH264 fallback). Build tags: `cgo && !noffmpeg` for FFmpeg, `cgo && openh264` for OpenH264. Also provides AVC1↔Annex B NALU helpers used by output muxer.
 - **Simple Mode:** Volunteer-friendly layout with just preview/program + source buttons + CUT/DISSOLVE. Layout mode detected from URL param (`?mode=simple`) > localStorage > default 'traditional'. Auto-persists URL param to localStorage.
 - **Media pipeline:** Per-source MoQTransport → PrismVideoDecoder → VideoRenderBuffer → PrismRenderer (rAF loop). Audio via PrismAudioDecoder with AudioContext for PFL/metering.
 - **FTB reverse:** Smooth fade-in from black using inverted blend position (`1.0 - pos`). New `TransitionFTBReverse` type.
