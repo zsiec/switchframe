@@ -157,11 +157,11 @@ research/                        # Detailed research by topic
 - **PFL:** Client-side only, per-operator, no server involvement
 - **Program relay bridge:** Use `server.RegisterStream("program")` relay directly (zero extra Prism changes)
 - **AFV wiring:** State callback triggers `mixer.OnProgramChange` before state broadcast to browsers
-- **Dissolve transitions:** Server-side OpenH264 decode → RGB blend → encode. Returns to zero-CPU passthrough between transitions.
-- **Transition engine:** Created per-transition, destroyed on complete/abort. Wall-clock frame pairing, output driven by incoming source.
-- **Blend colorspace:** RGB (BT.709) for mathematically correct alpha compositing.
-- **T-bar control:** Unthrottled REST position updates. HTTP/3 multiplexed on shared QUIC connection.
-- **Resolution mismatch:** Falls back to cut. No scaler in Phase 4.
+- **Dissolve transitions:** Server-side OpenH264 decode → YUV420 blend → encode. Returns to zero-CPU passthrough between transitions.
+- **Transition engine:** Created per-transition, destroyed on complete/abort. Wall-clock frame pairing with smoothstep easing, output driven by incoming source. Encoder bitrate/fps derived from source stream statistics.
+- **Blend colorspace:** YUV420 (BT.709 domain) matching hardware broadcast mixers (ATEM, Ross). Avoids costly YUV↔RGB round-trip.
+- **T-bar control:** Throttled REST position updates (50ms/20Hz). HTTP/3 multiplexed on shared QUIC connection.
+- **Resolution mismatch:** Pure Go bilinear scaler normalizes mismatched sources to program resolution during transitions. No new cgo dependencies.
 - **Browser dissolve:** WebGPU shader + Canvas 2D fallback. Client-side preview only; server produces authoritative output.
 - **Recording format:** MPEG-TS (.ts) -- crash-resilient (no moov atom), same muxer as SRT output.
 - **SRT modes:** Both caller (push to platform) and listener (accept N pulls, max 8). srtgo is pure Go (no cgo).
