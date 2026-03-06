@@ -190,6 +190,7 @@ Dockerfile                       # Multi-stage build (UI → Go → runtime)
 - **SRT wiring:** Function injection pattern — `srt_wire.go` provides real `srt.Dial()`/`srt.Listen()` wrappers, injected into OutputManager from `main.go`. Uses `zsiec/srtgo` (pure Go, no cgo).
 - **Ring buffer overflow:** `onReconnect(overflowed bool)` callback on SRTCaller. OutputManager logs warning and broadcasts state on overflow.
 - **Static file embedding:** Build tags (`embed_ui` / `!embed_ui`) with symlink for `//go:embed`. SPA file server with immutable cache headers for `/_app/immutable/*`.
+- **Hardware encoder recommendation:** Hardware encoder (NVENC, VA-API, VideoToolbox) strongly recommended for 1080p transitions. Software-only (libx264) is marginal above 720p. Startup probe auto-detects and logs warning if software-only.
 
 ## Prism Dependency
 
