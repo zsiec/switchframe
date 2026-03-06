@@ -45,10 +45,12 @@ server/                          # Go module (github.com/zsiec/switchframe/serve
     stub_codec.go                #   No-op codec stubs (non-cgo builds)
   control/                       # REST API + state broadcast
     api.go                       #   HTTP handlers: cut, preview, transition, FTB, audio, recording,
-                                 #     SRT, confidence, presets, stinger, graphics, debug
+                                 #     SRT, confidence, presets, stinger, graphics, macros, replay,
+                                 #     operators, keying, debug
+    api_operator.go              #   Operator management HTTP handlers (register, lock, heartbeat)
     state.go                     #   StatePublisher (JSON serialize -> callback)
     auth.go                      #   API key authentication
-    middleware.go                #   HTTP middleware (logging, auth)
+    middleware.go                #   HTTP middleware (logging, auth, metrics)
   transition/                    # Transition engine
     engine.go                    #   TransitionEngine lifecycle (start/ingest/complete/abort)
     blend.go                     #   YUV420 blending (mix, dip, wipe, FTB, stinger)
@@ -102,6 +104,17 @@ server/                          # Go module (github.com/zsiec/switchframe/serve
     types.go                     #   Macro, MacroStep, MacroAction types
     store.go                     #   File-based JSON CRUD (atomic writes)
     runner.go                    #   Sequential executor with delays + context cancellation
+  operator/                      # Multi-operator management
+    types.go                     #   Role/Subsystem enums, permission matrix, Operator/Session types
+    store.go                     #   File-based operator registration (JSON, atomic writes)
+    session.go                   #   Session tracking, subsystem locking, 60s stale cleanup
+    middleware.go                #   HTTP middleware: role permission + lock ownership checks
+  replay/                        # Instant replay system
+    types.go                     #   PlayerState, Config, bufferedFrame, gopDescriptor, MarkPoints
+    buffer.go                    #   Per-source GOP-aligned circular buffer with wall-clock clipping
+    viewer.go                    #   distribution.Viewer for capturing source frames to buffer
+    player.go                    #   Decode → re-encode pipeline with frame duplication for slow-mo
+    manager.go                   #   Replay orchestration: mark-in/out, play, stop, per-source buffers
   demo/                          # Simulated camera sources for demo mode
     source.go                    #   StartSources(): N fake cameras at 30fps
     demux.go                     #   Demo stream demuxer
@@ -119,6 +132,7 @@ ui/                              # SvelteKit frontend (Svelte 5 + TypeScript)
         control-room.svelte.ts   #   Svelte 5 $state store with MoQ update handler
         notifications.svelte.ts  #   Toast notification state
         preferences.svelte.ts    #   User preferences state
+        operator.svelte.ts       #   Operator session state (token, role, heartbeat)
       keyboard/                  # Keyboard shortcut handler
         handler.ts               #   Capture-phase keydown with event.code
       transport/                 # WebTransport connection management
@@ -165,6 +179,10 @@ ui/                              # SvelteKit frontend (Svelte 5 + TypeScript)
       Toast.svelte               #   Toast notification
       MacroPanel.svelte          #   Macro buttons grid with run/edit/delete
       KeyPanel.svelte            #   Upstream key configuration (chroma/luma)
+      ReplayPanel.svelte         #   Instant replay controls (mark-in/out, play, speed)
+      OperatorBadge.svelte       #   Operator name/role display badge
+      OperatorRegistration.svelte #  Operator registration form (name, role)
+      LockIndicator.svelte       #   Subsystem lock status indicator
       auto-animation.svelte.ts   #   Auto transition animation state
     lib/layout/                  # Layout mode management
       preferences.ts             #   URL param + localStorage detection/persistence
@@ -182,7 +200,7 @@ Dockerfile                       # Multi-stage build (UI → Go → runtime)
 
 1. **This file** — layout and conventions
 
-## Current State (MVP + Production Hardening — Phases 1-14)
+## Current State (MVP + Production Hardening — Phases 1-16)
 
 - **Branch:** `main`
 - **Tests:** ~800 Go tests + 495 Vitest tests + 45 E2E tests passing with `-race`
@@ -196,7 +214,9 @@ Dockerfile                       # Multi-stage build (UI → Go → runtime)
 - **Phase 12 (Frame Synchronizer):** Freerun FrameSynchronizer aligns multi-source frames to common tick boundary (90 kHz PTS), 2-frame ring buffer per source, audio freeze limited to 2 repeats to prevent AAC glitch loop
 - **Phase 13 (Advanced Audio):** 3-band parametric EQ (RBJ biquad filters), single-band compressor with envelope follower, pipeline: Trim→EQ→Compressor→Fader→Mix→Master→Limiter→Encode, passthrough optimization preserved, multiview audio level bars on source tiles
 - **Phase 14 (Operator Experience):** Macro system (file-based store, sequential runner, Ctrl+1-9 keyboard triggers), responsive layout (4 breakpoints, touch support), upstream chroma/luma keying in YUV420 domain
-- **What's stubbed:** Multi-destination SRT (v1.5), ISO per-source recording (v2.5), WebGPU dissolve (Canvas 2D fallback works)
+- **Phase 15 (Instant Replay):** Per-source GOP-aligned circular buffers (configurable 1-300s via `--replay-buffer-secs`), mark-in/out with wall-clock precision, variable-speed playback (0.25x-1x) with frame duplication, loop mode, replay relay, 6 API endpoints, ReplayPanel UI component
+- **Phase 16 (Multi-Operator):** Role-based operator management (director/audio/graphics/viewer), subsystem locking (switching/audio/graphics/replay/output), per-operator bearer tokens with session heartbeat, 60s stale timeout with auto lock release, director force-unlock, backward-compatible (all requests pass through when no operators registered), operator store (`~/.switchframe/operators.json`), OperatorBadge/Registration/LockIndicator UI components
+- **What's stubbed:** Multi-destination SRT (v1.5), ISO per-source recording (v2.5), WebGPU dissolve (Canvas 2D fallback works), replay audio (muted in v1)
 
 ## Key Architecture Decisions
 
@@ -245,6 +265,9 @@ Dockerfile                       # Multi-stage build (UI → Go → runtime)
 - **Macro system:** File-based JSON store at `~/.switchframe/macros.json` (mirrors `preset/store.go` pattern). `MacroTarget` interface for testability. Sequential executor with `time.After` + `ctx.Done` select for wait/cancellation.
 - **Responsive layout:** CSS-only media queries at 4 breakpoints (1920/1024/768px). `@media (pointer: coarse)` for 44px touch targets. AudioMixer collapses below 1024px.
 - **Upstream keying:** Chroma/luma key generation in YUV420 domain (matches blend architecture). `KeyProcessor` applies per-source key chain before DSK compositing. Cb/Cr distance for chroma, Y threshold for luma, with smoothness feathering.
+- **Instant replay:** Per-source GOP-aligned circular buffers with wall-clock clipping. `replayBuffer.ExtractClip(inTime, outTime)` finds nearest GOP keyframe. Player decodes clip, sorts by PTS, estimates FPS, re-encodes with frame duplication for slow-mo (`dupCount = ceil(1/speed)`). Output paced at source FPS via timers. Replay routed to dedicated `"replay"` relay registered via `server.RegisterStream("replay")`. Audio muted in v1.
+- **Operator management:** File-based operator store at `~/.switchframe/operators.json`. 4 roles (director/audio/graphics/viewer) with 5 lockable subsystems (switching/audio/graphics/replay/output). Per-operator 64-char hex bearer tokens. `SessionManager` tracks heartbeats with 60s stale timeout and 15s cleanup interval. `OperatorMiddleware` enforces role permission + lock ownership on every command (GET requests exempt). Backward-compatible: no operators registered = all requests pass through.
+- **Replay relay:** Registered as `server.RegisterStream("replay")`. Replay player output broadcast to this relay so browsers can subscribe via MoQ for replay monitoring.
 
 ## Prism Dependency
 
