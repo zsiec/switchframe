@@ -26,13 +26,11 @@ server/                          # Go module (github.com/zsiec/switchframe/serve
     admin.go                     #   Admin/debug HTTP endpoints
   switcher/                      # Core switching engine
     switcher.go                  #   State machine: Cut(), SetPreview(), frame routing, audio handler
-    source_viewer.go             #   Per-source Viewer proxy (tags frames with source key)
+    source_viewer.go             #   Per-source Viewer proxy (atomic.Pointer for lock-free hot path)
+    frame_sync.go                #   FrameSynchronizer: freerun frame alignment (90 kHz PTS)
     health.go                    #   Source health monitor (stale/no_signal/offline)
     delay_buffer.go              #   Per-source frame delay buffer (0-500ms)
     gop_cache.go                 #   GOP cache for instant keyframe on cut
-    integration_test.go          #   End-to-end tests: source relay -> switcher -> program relay + audio
-    stress_test.go               #   Stress tests: rapid cuts, concurrent access, 20 sources
-    soak_test.go                 #   Long-running stability test (10s local, 1h nightly)
   audio/                         # Audio mixing engine
     mixer.go                     #   Per-channel decode/mix/encode, passthrough optimization
     codec.go                     #   AudioDecoder/AudioEncoder interfaces + factory types
@@ -42,59 +40,71 @@ server/                          # Go module (github.com/zsiec/switchframe/serve
     crossfade.go                 #   Equal-power cos/sin ramp
     metering.go                  #   Peak level computation + LinearToDBFS
     limiter.go                   #   Brickwall limiter at -1 dBFS
+    eq.go                        #   3-band parametric EQ (RBJ biquad, Direct Form II Transposed)
+    compressor.go                #   Single-band compressor (envelope follower, makeup gain)
     stub_codec.go                #   No-op codec stubs (non-cgo builds)
   control/                       # REST API + state broadcast
-    api.go                       #   HTTP handlers: cut, preview, state, sources, audio level/mute/AFV/master
+    api.go                       #   HTTP handlers: cut, preview, transition, FTB, audio, recording,
+                                 #     SRT, confidence, presets, stinger, graphics, debug
     state.go                     #   StatePublisher (JSON serialize -> callback)
     auth.go                      #   API key authentication
     middleware.go                #   HTTP middleware (logging, auth)
-  transition/                      # Dissolve transition engine
-    engine.go                      #   TransitionEngine lifecycle (start/ingest/complete/abort)
-    blend.go                       #   RGB alpha blending (mix, dip, FTB)
-    color.go                       #   BT.709 YUV420↔RGB colorspace conversion
-    codec.go                       #   VideoDecoder/VideoEncoder interfaces + mocks
-    types.go                       #   TransitionType/TransitionState constants
-    scaler.go                      #   Pure Go bilinear YUV420 scaler for resolution mismatch
-  output/                          # Recording + SRT output engine
-    manager.go                     #   OutputManager: lifecycle, viewer, fan-out
-    muxer.go                       #   TSMuxer: MPEG-TS muxing (go-astits)
-    types.go                       #   OutputAdapter interface, status types
-    viewer.go                      #   outputViewer (distribution.Viewer on program relay)
-    recorder.go                    #   FileRecorder adapter (.ts file, rotation)
-    srt_caller.go                  #   SRTCaller adapter (push mode, reconnect, overflow callback)
-    srt_listener.go                #   SRTListener adapter (pull, N conns)
-    srt_common.go                  #   Shared srtConn interface
-    srt_wire.go                    #   Real srtgo connection wrappers
-    ringbuf.go                     #   Ring buffer for SRT reconnection
-    async_adapter.go               #   Async write adapter (non-blocking output)
-    integration_test.go            #   End-to-end tests
-  codec/                           # Video codec infrastructure + NALU/ADTS helpers
-    ffmpeg_cgo.go                  #   FFmpeg cgo CFLAGS/LDFLAGS (libavcodec/libavutil)
-    ffmpeg_encoder.go              #   FFmpegEncoder (x264/NVENC/VA-API/VideoToolbox)
-    ffmpeg_decoder.go              #   FFmpegDecoder (H.264 software + HW)
-    probe.go                       #   ProbeEncoders() startup auto-detection
-    video.go                       #   NewVideoEncoder/NewVideoDecoder unified factories
-    openh264_encoder.go            #   OpenH264 fallback encoder (build tag: openh264)
-    openh264_decoder.go            #   OpenH264 fallback decoder (build tag: openh264)
-    nalu.go                        #   AVC1↔Annex B conversion
-    adts.go                        #   ADTS header construction
-    openh264_cgo.go                #   OpenH264 cgo CFLAGS/LDFLAGS
-    stub_codec.go                  #   Stub codec (non-cgo builds)
-    stub_ffmpeg.go                 #   Stub FFmpeg (non-cgo builds)
-  metrics/                         # Prometheus metrics
-    metrics.go                     #   Metrics registry (counters, gauges, histograms)
-  debug/                           # Debug/diagnostic tools
-    collector.go                   #   Debug snapshot collector (all subsystems)
-    event_log.go                   #   Circular event log for diagnostics
-  graphics/                        # DSK graphics overlay
-    blend.go                       #   Alpha blending for overlay compositing
-    compositor.go                  #   DSK compositor (template → overlay → program)
-  preset/                          # Switcher preset save/recall
-    store.go                       #   Preset storage (file-based)
-    recall.go                      #   Preset recall logic
-  demo/                            # Simulated camera sources for demo mode
-    source.go                      #   StartSources(): N fake cameras at 30fps
-    demux.go                       #   Demo stream demuxer
+  transition/                    # Transition engine
+    engine.go                    #   TransitionEngine lifecycle (start/ingest/complete/abort)
+    blend.go                     #   YUV420 blending (mix, dip, wipe, FTB, stinger)
+    color.go                     #   BT.709 YUV420↔RGB colorspace conversion
+    codec.go                     #   VideoDecoder/VideoEncoder interfaces + mocks
+    types.go                     #   TransitionType/TransitionState/WipeDirection constants
+    scaler.go                    #   Pure Go bilinear YUV420 scaler for resolution mismatch
+  output/                        # Recording + SRT output engine
+    manager.go                   #   OutputManager: lifecycle, viewer, fan-out, confidence monitor
+    muxer.go                     #   TSMuxer: MPEG-TS muxing (go-astits)
+    types.go                     #   OutputAdapter interface, status types
+    viewer.go                    #   OutputViewer (distribution.Viewer on program relay)
+    recorder.go                  #   FileRecorder adapter (.ts file, rotation)
+    confidence.go                #   ConfidenceMonitor (1fps JPEG thumbnail from program keyframes)
+    srt_caller.go                #   SRTCaller adapter (push mode, reconnect, overflow tracking)
+    srt_listener.go              #   SRTListener adapter (pull, N conns)
+    srt_common.go                #   Shared srtConn interface
+    srt_wire.go                  #   Real srtgo connection wrappers
+    ringbuf.go                   #   Ring buffer for SRT reconnection
+    async_adapter.go             #   Async write adapter (non-blocking output)
+  stinger/                       # Stinger transition clips
+    store.go                     #   StingerStore: load/upload/delete PNG sequences, path traversal
+                                 #     prevention, maxClips limit, sentinel errors
+  codec/                         # Video codec infrastructure + NALU/ADTS helpers
+    ffmpeg_cgo.go                #   FFmpeg cgo CFLAGS/LDFLAGS (libavcodec/libavutil)
+    ffmpeg_encoder.go            #   FFmpegEncoder (x264/NVENC/VA-API/VideoToolbox)
+    ffmpeg_decoder.go            #   FFmpegDecoder (H.264 software + HW)
+    probe.go                     #   ProbeEncoders() startup auto-detection
+    video.go                     #   NewVideoEncoder/NewVideoDecoder unified factories
+    openh264_encoder.go          #   OpenH264 fallback encoder (build tag: openh264)
+    openh264_decoder.go          #   OpenH264 fallback decoder (build tag: openh264)
+    nalu.go                      #   AVC1↔Annex B conversion
+    adts.go                      #   ADTS header construction
+    openh264_cgo.go              #   OpenH264 cgo CFLAGS/LDFLAGS
+    stub_codec.go                #   Stub codec (non-cgo builds)
+    stub_ffmpeg.go               #   Stub FFmpeg (non-cgo builds)
+  metrics/                       # Prometheus metrics
+    metrics.go                   #   Metrics registry (counters, gauges, histograms)
+  debug/                         # Debug/diagnostic tools
+    collector.go                 #   Debug snapshot collector (all subsystems)
+    event_log.go                 #   Circular event log for diagnostics
+  graphics/                      # DSK graphics overlay + upstream keying
+    blend.go                     #   Alpha blending for overlay compositing
+    compositor.go                #   DSK compositor (template → overlay → program)
+    keyer.go                     #   Chroma/luma key generation in YUV420 domain
+    key_processor.go             #   Upstream key chain (per-source, before mix)
+  preset/                        # Switcher preset save/recall
+    store.go                     #   Preset storage (file-based)
+    recall.go                    #   Preset recall logic
+  macro/                         # Macro system
+    types.go                     #   Macro, MacroStep, MacroAction types
+    store.go                     #   File-based JSON CRUD (atomic writes)
+    runner.go                    #   Sequential executor with delays + context cancellation
+  demo/                          # Simulated camera sources for demo mode
+    source.go                    #   StartSources(): N fake cameras at 30fps
+    demux.go                     #   Demo stream demuxer
   internal/                      # Shared types
     types.go                     #   ControlRoomState, SourceInfo, TallyStatus, AudioChannel
 ui/                              # SvelteKit frontend (Svelte 5 + TypeScript)
@@ -103,35 +113,62 @@ ui/                              # SvelteKit frontend (Svelte 5 + TypeScript)
       prism/                     # Vendored Prism TS modules (transport, decode, render)
       api/                       # REST API client + TypeScript types
         types.ts                 #   ControlRoomState, SourceInfo, TallyStatus, AudioChannel types
-        switch-api.ts            #   cut(), setPreview(), setLabel(), getState(), setLevel/Mute/AFV/Master
+        switch-api.ts            #   Full REST client: cut, preview, transition, audio (EQ/compressor),
+                                 #     presets, stinger, recording, SRT, graphics, macros, keying
       state/                     # Reactive state management
         control-room.svelte.ts   #   Svelte 5 $state store with MoQ update handler
+        notifications.svelte.ts  #   Toast notification state
+        preferences.svelte.ts    #   User preferences state
       keyboard/                  # Keyboard shortcut handler
         handler.ts               #   Capture-phase keydown with event.code
       transport/                 # WebTransport connection management
         connection.ts            #   Auto-retry WebTransport with REST polling fallback
+        connection-manager.ts    #   Connection lifecycle manager
         media-pipeline.ts        #   MoQ → decoder orchestrator (per-source)
-      video/                     # Video playback and transition rendering
-        playback.ts              #   Video playback manager (MoQ → decoder → buffer)
+        source-errors.svelte.ts  #   Per-source error tracking
+      video/                     # Video rendering
         dissolve.ts              #   WebGPU dissolve renderer + Canvas 2D fallback
         dissolve-fallback.ts     #   Canvas 2D dissolve/dip rendering
+        canvas-utils.ts          #   Canvas helper utilities
       audio/                     # Client-side audio
         pfl.ts                   #   PFL manager (per-source solo monitoring)
+        pfl-toggle.ts            #   PFL toggle utility
+      graphics/                  # Graphics overlay
+        publisher.ts             #   Graphics publisher
+        templates.ts             #   Graphics templates
+      pipeline/                  # Media pipeline
+        manager.ts               #   Pipeline lifecycle manager
+      util/                      # Utilities
+        throttle.ts              #   Throttle function (used by T-bar)
     components/                  # Svelte UI components
       Multiview.svelte           #   Source tile grid with tally outlines + canvas
       ProgramPreview.svelte      #   Large preview/program windows with canvas
       PreviewBus.svelte          #   Green preview source buttons
       ProgramBus.svelte          #   Red program source buttons
-      TransitionControls.svelte  #   CUT / AUTO / FTB buttons
-      SourceTile.svelte          #   Single source button with tally color + canvas
-      AudioMixer.svelte          #   Channel strips: faders, VU meters, PFL/MUTE/AFV
+      TransitionControls.svelte  #   CUT / AUTO / FTB + type selector (mix/dip/wipe/stinger)
+      SourceTile.svelte          #   Single source button with tally color + canvas + audio bar
+      AudioMixer.svelte          #   Channel strips: faders, VU meters, PFL/MUTE/AFV, EQ/compressor
       KeyboardOverlay.svelte     #   Keyboard shortcut reference (press ?)
-      OutputControls.svelte        #   Header: REC button + SRT status + MODE toggle
-      RecordingControl.svelte      #   Recording start/stop/status
-      SRTOutputModal.svelte        #   SRT configuration modal
-      SimpleMode.svelte            #   Volunteer-friendly layout (CUT/DISSOLVE + sources)
-    lib/layout/                    # Layout mode management
+      OutputControls.svelte      #   Header: REC button + SRT status + MODE toggle
+      RecordingControl.svelte    #   Recording start/stop/status
+      SRTOutputModal.svelte      #   SRT configuration modal
+      SimpleMode.svelte          #   Volunteer-friendly layout (CUT/DISSOLVE + sources)
+      GraphicsPanel.svelte       #   DSK graphics control panel
+      Clock.svelte               #   Live clock display
+      ConfirmDialog.svelte       #   Confirmation dialog
+      ConnectionBanner.svelte    #   Connection status banner
+      ConnectionStatus.svelte    #   Connection status indicator
+      ErrorBoundary.svelte       #   Error boundary wrapper
+      HealthAlarm.svelte         #   Source health alarm
+      LoadingOverlay.svelte      #   Loading state overlay
+      ProgramHealthBanner.svelte #   Program health status
+      Toast.svelte               #   Toast notification
+      MacroPanel.svelte          #   Macro buttons grid with run/edit/delete
+      KeyPanel.svelte            #   Upstream key configuration (chroma/luma)
+      auto-animation.svelte.ts   #   Auto transition animation state
+    lib/layout/                  # Layout mode management
       preferences.ts             #   URL param + localStorage detection/persistence
+      responsive.css             #   Responsive breakpoints + touch support utilities
     routes/
       +page.svelte               #   Layout switcher (traditional/simple) + media pipeline
       +layout.svelte             #   Root layout (CSS import)
@@ -145,21 +182,27 @@ Dockerfile                       # Multi-stage build (UI → Go → runtime)
 
 1. **This file** — layout and conventions
 
-## Current State (MVP + Production Hardening — Phases 1-8)
+## Current State (MVP + Production Hardening — Phases 1-14)
 
 - **Branch:** `main`
-- **Tests:** 639 Go tests + 478 Vitest tests + 45 E2E tests passing with `-race`
+- **Tests:** ~800 Go tests + 495 Vitest tests + 45 E2E tests passing with `-race`
 - **What works:** Everything from Phases 1-5 + Simple Mode (volunteer-friendly layout), video/audio playback pipeline (MoQ → decoder → canvas), PFL audio decode + metering, FTB reverse toggle (smooth fade-in), recording file rotation (time + size), SRT wired to real zsiec/srtgo (pure Go), ring buffer overflow monitoring with reconnect callback, static file embedding (single binary), Dockerfile (multi-stage), GitHub Actions CI, Makefile with dev/build/docker/test targets, `make demo` with 4 simulated cameras (`--demo` flag)
 - **Phase 6 (Instrumentation):** Prometheus metrics, debug snapshot collector, event log, admin endpoints
 - **Phase 7 (Production Hardening):** Source delay buffer, GOP cache, auth middleware, brickwall limiter, async output adapter, codec stubs, DSK graphics compositor
 - **Phase 8 (Testing Hardening):** Codec fuzz tests (found+fixed SplitADTSFrames bug), benchmark suite (19 benchmarks), stress tests (6), integration gap tests (12), soak test, frontend stress tests (6)
+- **Phase 9 (Audio Polish):** Per-channel audio input trim (-20 to +20 dB), per-channel audio metering, PCM pre-buffering for crossfade gap elimination
+- **Phase 10 (Output Confidence):** ConfidenceMonitor for 1fps JPEG thumbnail of program output, `GET /api/output/confidence` endpoint
+- **Phase 11 (Stinger Transitions):** PNG sequence stinger clips with per-pixel alpha blending, StingerStore (load/upload/delete), zip upload with path traversal prevention, maxClips memory limit (default 16), configurable cut point
+- **Phase 12 (Frame Synchronizer):** Freerun FrameSynchronizer aligns multi-source frames to common tick boundary (90 kHz PTS), 2-frame ring buffer per source, audio freeze limited to 2 repeats to prevent AAC glitch loop
+- **Phase 13 (Advanced Audio):** 3-band parametric EQ (RBJ biquad filters), single-band compressor with envelope follower, pipeline: Trim→EQ→Compressor→Fader→Mix→Master→Limiter→Encode, passthrough optimization preserved, multiview audio level bars on source tiles
+- **Phase 14 (Operator Experience):** Macro system (file-based store, sequential runner, Ctrl+1-9 keyboard triggers), responsive layout (4 breakpoints, touch support), upstream chroma/luma keying in YUV420 domain
 - **What's stubbed:** Multi-destination SRT (v1.5), ISO per-source recording (v2.5), WebGPU dissolve (Canvas 2D fallback works)
 
 ## Key Architecture Decisions
 
 - **Commands:** REST POST over HTTP/3 (NOT MoQ custom messages — spec says unknown types cause PROTOCOL_VIOLATION)
 - **State broadcast:** MoQ "control" track with JSON (full snapshot per group for late-join)
-- **Frame routing:** Per-source `sourceViewer` implements `distribution.Viewer`, tags frames with source key. Switcher forwards only program source's frames to program Relay.
+- **Frame routing:** Per-source `sourceViewer` implements `distribution.Viewer`, tags frames with source key. Uses `atomic.Pointer[T]` for lock-free reads on hot path. Switcher forwards only program source's frames to program Relay.
 - **Keyframe gating:** After a cut, video+audio are gated until first IDR from new source to prevent decoder artifacts.
 - **Prism extension:** `ServerConfig.ExtraRoutes` added to Prism for mounting Switchframe's REST API on Prism's mux.
 - **Frontend:** Svelte 5 + SvelteKit with static adapter (for Go binary embed)
@@ -175,13 +218,14 @@ Dockerfile                       # Multi-stage build (UI → Go → runtime)
 - **Dissolve transitions:** Server-side FFmpeg decode → YUV420 blend → encode (High profile, medium preset). Returns to zero-CPU passthrough between transitions.
 - **Transition engine:** Created per-transition, destroyed on complete/abort. Wall-clock frame pairing with smoothstep easing, output driven by incoming source. Encoder bitrate/fps derived from source stream statistics.
 - **Blend colorspace:** YUV420 (BT.709 domain) matching hardware broadcast mixers (ATEM, Ross). Avoids costly YUV↔RGB round-trip.
+- **Wipe transitions:** 6 directions (h-left, h-right, v-top, v-bottom, box-center-out, box-edges-in) using per-pixel threshold mask with 4px soft edge in YUV420 domain.
 - **T-bar control:** Throttled REST position updates (50ms/20Hz). HTTP/3 multiplexed on shared QUIC connection.
 - **Resolution mismatch:** Pure Go bilinear scaler normalizes mismatched sources to program resolution during transitions. No new cgo dependencies.
 - **Browser dissolve:** WebGPU shader + Canvas 2D fallback. Client-side preview only; server produces authoritative output.
 - **Recording format:** MPEG-TS (.ts) -- crash-resilient (no moov atom), same muxer as SRT output.
 - **SRT modes:** Both caller (push to platform) and listener (accept N pulls, max 8). srtgo is pure Go (no cgo).
 - **Output lifecycle:** OutputManager auto-registers viewer on program relay when first output starts, removes when last stops. Zero CPU when inactive.
-- **SRT reconnection:** Exponential backoff (1s->30s) with 4MB ring buffer. Resume from keyframe if overflow.
+- **SRT reconnection:** Exponential backoff (1s->30s) with 4MB ring buffer. Resume from keyframe if overflow. Overflow count tracked and broadcast in state snapshots, reset on Start().
 - **Shared codec:** `server/codec/` package: FFmpeg libavcodec cgo bindings (encoder + decoder), startup probe auto-detects best encoder (NVENC → VA-API → VideoToolbox → libx264 → OpenH264 fallback). Build tags: `cgo && !noffmpeg` for FFmpeg, `cgo && openh264` for OpenH264. Also provides AVC1↔Annex B NALU helpers used by output muxer.
 - **Simple Mode:** Volunteer-friendly layout with just preview/program + source buttons + CUT/DISSOLVE. Layout mode detected from URL param (`?mode=simple`) > localStorage > default 'traditional'. Auto-persists URL param to localStorage.
 - **Media pipeline:** Per-source MoQTransport → PrismVideoDecoder → VideoRenderBuffer → PrismRenderer (rAF loop). Audio via PrismAudioDecoder with AudioContext for PFL/metering.
@@ -191,6 +235,16 @@ Dockerfile                       # Multi-stage build (UI → Go → runtime)
 - **Ring buffer overflow:** `onReconnect(overflowed bool)` callback on SRTCaller. OutputManager logs warning and broadcasts state on overflow.
 - **Static file embedding:** Build tags (`embed_ui` / `!embed_ui`) with symlink for `//go:embed`. SPA file server with immutable cache headers for `/_app/immutable/*`.
 - **Hardware encoder recommendation:** Hardware encoder (NVENC, VA-API, VideoToolbox) strongly recommended for 1080p transitions. Software-only (libx264) is marginal above 720p. Startup probe auto-detects and logs warning if software-only.
+- **Stinger transitions:** PNG sequence clips pre-decoded to YUV420 + per-pixel alpha plane. `BlendStinger()` composites overlay with bounds checking. Stored in `StingerStore` with zip upload (`POST /api/stinger/{name}/upload`), path traversal prevention via `validateName()`, and maxClips memory limit (default 16, ~156MB per 1080p 30-frame clip).
+- **Frame synchronizer:** Optional `FrameSynchronizer` aligns multi-source frames to a common tick boundary. Per-source 2-frame ring buffer with newest-wins policy. PTS rewritten to monotonic 90 kHz MPEG-TS clock. Audio freeze limited to 2 consecutive repeats to prevent AAC glitch loop (downstream handles silence).
+- **Confidence monitor:** `ConfidenceMonitor` generates 320x180 JPEG thumbnails from program keyframes at ≤1fps. Exposed via `GET /api/output/confidence` with `no-store` cache header. Lifecycle owned by `OutputManager.Close()`.
+- **Parametric EQ:** 3-band (Low/Mid/High) using RBJ Audio EQ Cookbook peakingEQ biquad coefficients. Direct Form II Transposed processing. Coefficients recalculated only on parameter change, not per-frame. `IsBypassed()` check preserves passthrough optimization.
+- **Audio compressor:** Single-band with exponential envelope follower (reuses `limiter.go` pattern). Threshold/ratio/attack/release/makeup gain. `GainReduction()` exported for UI metering.
+- **Audio pipeline order:** Trim → EQ → Compressor → Fader → Mix → Master → Limiter → Encode. Passthrough check: all channels at 0dB with EQ bypassed and compressor bypassed.
+- **Multiview audio bars:** 4px vertical bar on right edge of SourceTile. Green → yellow (>-12dB) → red (>-3dB). Data from existing state broadcast `audioLevels`.
+- **Macro system:** File-based JSON store at `~/.switchframe/macros.json` (mirrors `preset/store.go` pattern). `MacroTarget` interface for testability. Sequential executor with `time.After` + `ctx.Done` select for wait/cancellation.
+- **Responsive layout:** CSS-only media queries at 4 breakpoints (1920/1024/768px). `@media (pointer: coarse)` for 44px touch targets. AudioMixer collapses below 1024px.
+- **Upstream keying:** Chroma/luma key generation in YUV420 domain (matches blend architecture). `KeyProcessor` applies per-source key chain before DSK compositing. Cb/Cr distance for chroma, Y threshold for luma, with smoothness feathering.
 
 ## Prism Dependency
 
