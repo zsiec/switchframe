@@ -23,11 +23,16 @@ server/                          # Go module (github.com/zsiec/switchframe/serve
   cmd/switchframe/main.go        # Binary entry point (standalone HTTP on :8080)
     embed_prod.go                #   Static file embedding (build tag: embed_ui)
     embed_dev.go                 #   No-op handler (default, dev mode)
+    admin.go                     #   Admin/debug HTTP endpoints
   switcher/                      # Core switching engine
     switcher.go                  #   State machine: Cut(), SetPreview(), frame routing, audio handler
     source_viewer.go             #   Per-source Viewer proxy (tags frames with source key)
     health.go                    #   Source health monitor (stale/no_signal/offline)
+    delay_buffer.go              #   Per-source frame delay buffer (0-500ms)
+    gop_cache.go                 #   GOP cache for instant keyframe on cut
     integration_test.go          #   End-to-end tests: source relay -> switcher -> program relay + audio
+    stress_test.go               #   Stress tests: rapid cuts, concurrent access, 20 sources
+    soak_test.go                 #   Long-running stability test (10s local, 1h nightly)
   audio/                         # Audio mixing engine
     mixer.go                     #   Per-channel decode/mix/encode, passthrough optimization
     codec.go                     #   AudioDecoder/AudioEncoder interfaces + factory types
@@ -36,15 +41,20 @@ server/                          # Go module (github.com/zsiec/switchframe/serve
     fdk_encoder.go               #   FDK AAC encoder (direct cgo wrapper)
     crossfade.go                 #   Equal-power cos/sin ramp
     metering.go                  #   Peak level computation + LinearToDBFS
+    limiter.go                   #   Brickwall limiter at -1 dBFS
+    stub_codec.go                #   No-op codec stubs (non-cgo builds)
   control/                       # REST API + state broadcast
     api.go                       #   HTTP handlers: cut, preview, state, sources, audio level/mute/AFV/master
     state.go                     #   StatePublisher (JSON serialize -> callback)
+    auth.go                      #   API key authentication
+    middleware.go                #   HTTP middleware (logging, auth)
   transition/                      # Dissolve transition engine
     engine.go                      #   TransitionEngine lifecycle (start/ingest/complete/abort)
     blend.go                       #   RGB alpha blending (mix, dip, FTB)
     color.go                       #   BT.709 YUV420↔RGB colorspace conversion
     codec.go                       #   VideoDecoder/VideoEncoder interfaces + mocks
     types.go                       #   TransitionType/TransitionState constants
+    scaler.go                      #   Pure Go bilinear YUV420 scaler for resolution mismatch
   output/                          # Recording + SRT output engine
     manager.go                     #   OutputManager: lifecycle, viewer, fan-out
     muxer.go                       #   TSMuxer: MPEG-TS muxing (go-astits)
@@ -56,6 +66,7 @@ server/                          # Go module (github.com/zsiec/switchframe/serve
     srt_common.go                  #   Shared srtConn interface
     srt_wire.go                    #   Real srtgo connection wrappers
     ringbuf.go                     #   Ring buffer for SRT reconnection
+    async_adapter.go               #   Async write adapter (non-blocking output)
     integration_test.go            #   End-to-end tests
   codec/                           # Video codec infrastructure + NALU/ADTS helpers
     ffmpeg_cgo.go                  #   FFmpeg cgo CFLAGS/LDFLAGS (libavcodec/libavutil)
@@ -67,8 +78,23 @@ server/                          # Go module (github.com/zsiec/switchframe/serve
     openh264_decoder.go            #   OpenH264 fallback decoder (build tag: openh264)
     nalu.go                        #   AVC1↔Annex B conversion
     adts.go                        #   ADTS header construction
+    openh264_cgo.go                #   OpenH264 cgo CFLAGS/LDFLAGS
+    stub_codec.go                  #   Stub codec (non-cgo builds)
+    stub_ffmpeg.go                 #   Stub FFmpeg (non-cgo builds)
+  metrics/                         # Prometheus metrics
+    metrics.go                     #   Metrics registry (counters, gauges, histograms)
+  debug/                           # Debug/diagnostic tools
+    collector.go                   #   Debug snapshot collector (all subsystems)
+    event_log.go                   #   Circular event log for diagnostics
+  graphics/                        # DSK graphics overlay
+    blend.go                       #   Alpha blending for overlay compositing
+    compositor.go                  #   DSK compositor (template → overlay → program)
+  preset/                          # Switcher preset save/recall
+    store.go                       #   Preset storage (file-based)
+    recall.go                      #   Preset recall logic
   demo/                            # Simulated camera sources for demo mode
     source.go                      #   StartSources(): N fake cameras at 30fps
+    demux.go                       #   Demo stream demuxer
   internal/                      # Shared types
     types.go                     #   ControlRoomState, SourceInfo, TallyStatus, AudioChannel
 ui/                              # SvelteKit frontend (Svelte 5 + TypeScript)
@@ -113,8 +139,9 @@ ui/                              # SvelteKit frontend (Svelte 5 + TypeScript)
 docs/
   plans/
     2026-03-03-mvp-design.md     # Approved MVP design (Phases 1-5)
-    2026-03-03-phase1-implementation.md  # Phase 1 task breakdown (completed)
-  tech-debt.md                   # Deferred review findings — READ THIS before Phase 2
+    2026-03-05-production-hardening-design.md  # Phases 6-8 design
+    2026-03-05-production-hardening-plan.md    # Phases 6-8 implementation plan
+  tech-debt.md                   # Deferred review findings
 charter.md                       # Project charter (vision, architecture, pricing, GTM)
 phase0-findings.md               # Phase 0 research synthesis (15 areas)
 phase0-research.md               # Original research task list
@@ -137,12 +164,15 @@ research/                        # Detailed research by topic
 4. **`phase0-findings.md`** — research context (skim sections relevant to your task)
 5. **`charter.md`** — full vision (read if you need business/UX context)
 
-## Current State (MVP Complete — Phases 1-5 + Polish)
+## Current State (MVP + Production Hardening — Phases 1-8)
 
 - **Branch:** `main`
-- **Tests:** 357 Go tests + 176 Vitest tests + 39 E2E tests passing with `-race`
+- **Tests:** 639 Go tests + 478 Vitest tests + 45 E2E tests passing with `-race`
 - **What works:** Everything from Phases 1-5 + Simple Mode (volunteer-friendly layout), video/audio playback pipeline (MoQ → decoder → canvas), PFL audio decode + metering, FTB reverse toggle (smooth fade-in), recording file rotation (time + size), SRT wired to real zsiec/srtgo (pure Go), ring buffer overflow monitoring with reconnect callback, static file embedding (single binary), Dockerfile (multi-stage), GitHub Actions CI, Makefile with dev/build/docker/test targets, `make demo` with 4 simulated cameras (`--demo` flag)
-- **What's stubbed:** Wipe transitions (post-MVP), graphics overlay, multi-destination SRT (v1.5), ISO per-source recording (v2.5), WebGPU dissolve (Canvas 2D fallback works)
+- **Phase 6 (Instrumentation):** Prometheus metrics, debug snapshot collector, event log, admin endpoints
+- **Phase 7 (Production Hardening):** Source delay buffer, GOP cache, auth middleware, brickwall limiter, async output adapter, codec stubs, DSK graphics compositor
+- **Phase 8 (Testing Hardening):** Codec fuzz tests (found+fixed SplitADTSFrames bug), benchmark suite (19 benchmarks), stress tests (6), integration gap tests (12), soak test, frontend stress tests (6)
+- **What's stubbed:** Multi-destination SRT (v1.5), ISO per-source recording (v2.5), WebGPU dissolve (Canvas 2D fallback works)
 
 ## Key Architecture Decisions
 
