@@ -136,33 +136,14 @@ ui/                              # SvelteKit frontend (Svelte 5 + TypeScript)
       +page.svelte               #   Layout switcher (traditional/simple) + media pipeline
       +layout.svelte             #   Root layout (CSS import)
       +layout.ts                 #   SPA mode (no SSR, no prerender)
-docs/
-  plans/
-    2026-03-03-mvp-design.md     # Approved MVP design (Phases 1-5)
-    2026-03-05-production-hardening-design.md  # Phases 6-8 design
-    2026-03-05-production-hardening-plan.md    # Phases 6-8 implementation plan
-  tech-debt.md                   # Deferred review findings
-charter.md                       # Project charter (vision, architecture, pricing, GTM)
-phase0-findings.md               # Phase 0 research synthesis (15 areas)
-phase0-research.md               # Original research task list
-competitive-analysis.md          # 15 competitors analyzed
 Makefile                         # Build chain: dev, build, docker, test-all, clean
 Dockerfile                       # Multi-stage build (UI → Go → runtime)
 .github/workflows/ci.yml         # GitHub Actions: lint, test-go, test-ui, docker
-research/                        # Detailed research by topic
-  browser-capabilities.md        #   Keyboard, WebGPU dissolve, tally borders
-  deployment-infrastructure.md   #   Hosting comparison (Hetzner wins)
-  legal-licensing-trademark.md   #   AGPL, trademark risk, domains
-  market-and-audio-research.md   #   Church market data, audio crossfade techniques
 ```
 
 ## Reading Order for New Agents
 
 1. **This file** — layout and conventions
-2. **`docs/plans/2026-03-03-mvp-design.md`** — the approved design, all key decisions
-3. **`docs/tech-debt.md`** — deferred issues, known limitations, what to fix next
-4. **`phase0-findings.md`** — research context (skim sections relevant to your task)
-5. **`charter.md`** — full vision (read if you need business/UX context)
 
 ## Current State (MVP + Production Hardening — Phases 1-8)
 
@@ -233,5 +214,4 @@ Key Prism interfaces used:
 When completing a phase or making significant architectural changes:
 1. Update "Current State" section with new branch/test count/what works
 2. Add any new architecture decisions to the decisions section
-3. Move resolved tech-debt items out of `docs/tech-debt.md`
-4. Add new files to the repository layout
+3. Add new files to the repository layout
