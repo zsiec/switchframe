@@ -31,6 +31,8 @@ server/                          # Go module (github.com/zsiec/switchframe/serve
     health.go                    #   Source health monitor (stale/no_signal/offline)
     delay_buffer.go              #   Per-source frame delay buffer (0-500ms)
     gop_cache.go                 #   GOP cache for instant keyframe on cut
+    processing_frame.go          #   ProcessingFrame: raw YUV420 carrier through pipeline
+    pipeline_codecs.go           #   Shared decoder/encoder pool for video processing chain
   audio/                         # Audio mixing engine
     mixer.go                     #   Per-channel decode/mix/encode, passthrough optimization
     codec.go                     #   AudioDecoder/AudioEncoder interfaces + factory types
@@ -97,6 +99,7 @@ server/                          # Go module (github.com/zsiec/switchframe/serve
     compositor.go                #   DSK compositor (template → overlay → program)
     keyer.go                     #   Chroma/luma key generation in YUV420 domain
     key_processor.go             #   Upstream key chain (per-source, before mix)
+    key_processor_bridge.go      #   KeyProcessorBridge: fill decode + ProcessYUV for pipeline
   preset/                        # Switcher preset save/recall
     store.go                     #   Preset storage (file-based)
     recall.go                    #   Preset recall logic
@@ -268,6 +271,7 @@ Dockerfile                       # Multi-stage build (UI → Go → runtime)
 - **Instant replay:** Per-source GOP-aligned circular buffers with wall-clock clipping. `replayBuffer.ExtractClip(inTime, outTime)` finds nearest GOP keyframe. Player decodes clip, sorts by PTS, estimates FPS, re-encodes with frame duplication for slow-mo (`dupCount = ceil(1/speed)`). Output paced at source FPS via timers. Replay routed to dedicated `"replay"` relay registered via `server.RegisterStream("replay")`. Audio muted in v1.
 - **Operator management:** File-based operator store at `~/.switchframe/operators.json`. 4 roles (director/audio/graphics/viewer) with 5 lockable subsystems (switching/audio/graphics/replay/output). Per-operator 64-char hex bearer tokens. `SessionManager` tracks heartbeats with 60s stale timeout and 15s cleanup interval. `OperatorMiddleware` enforces role permission + lock ownership on every command (GET requests exempt). Backward-compatible: no operators registered = all requests pass through.
 - **Replay relay:** Registered as `server.RegisterStream("replay")`. Replay player output broadcast to this relay so browsers can subscribe via MoQ for replay monitoring.
+- **Raw YUV pipeline:** Video processing chain (key bridge → compositor) operates on raw YUV420 with a single decode at ingest and single encode at output. Eliminates multi-encode generation loss. TransitionEngine outputs raw YUV via callback; `pipelineCodecs` manages the shared encoder/decoder pool. Zero-CPU passthrough preserved when no processing is active.
 
 ## Prism Dependency
 
