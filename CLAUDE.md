@@ -238,7 +238,7 @@ Dockerfile                       # Multi-stage build (UI → Go → runtime)
 - **PFL:** Client-side only, per-operator, no server involvement
 - **Program relay bridge:** Use `server.RegisterStream("program")` relay directly (zero extra Prism changes)
 - **AFV wiring:** State callback triggers `mixer.OnProgramChange` before state broadcast to browsers
-- **Dissolve transitions:** Server-side FFmpeg decode → YUV420 blend → encode (High profile, medium preset). Returns to zero-CPU passthrough between transitions.
+- **Dissolve transitions:** Server-side FFmpeg decode → YUV420 blend → encode (High profile, medium preset). Always-on re-encode ensures consistent SPS/PPS across transition boundaries.
 - **Transition engine:** Created per-transition, destroyed on complete/abort. Wall-clock frame pairing with smoothstep easing, output driven by incoming source. Encoder bitrate/fps derived from source stream statistics.
 - **Blend colorspace:** YUV420 (BT.709 domain) matching hardware broadcast mixers (ATEM, Ross). Avoids costly YUV↔RGB round-trip.
 - **Wipe transitions:** 6 directions (h-left, h-right, v-top, v-bottom, box-center-out, box-edges-in) using per-pixel threshold mask with 4px soft edge in YUV420 domain.
@@ -271,7 +271,7 @@ Dockerfile                       # Multi-stage build (UI → Go → runtime)
 - **Instant replay:** Per-source GOP-aligned circular buffers with wall-clock clipping. `replayBuffer.ExtractClip(inTime, outTime)` finds nearest GOP keyframe. Player decodes clip, sorts by PTS, estimates FPS, re-encodes with frame duplication for slow-mo (`dupCount = ceil(1/speed)`). Output paced at source FPS via timers. Replay routed to dedicated `"replay"` relay registered via `server.RegisterStream("replay")`. Audio muted in v1.
 - **Operator management:** File-based operator store at `~/.switchframe/operators.json`. 4 roles (director/audio/graphics/viewer) with 5 lockable subsystems (switching/audio/graphics/replay/output). Per-operator 64-char hex bearer tokens. `SessionManager` tracks heartbeats with 60s stale timeout and 15s cleanup interval. `OperatorMiddleware` enforces role permission + lock ownership on every command (GET requests exempt). Backward-compatible: no operators registered = all requests pass through.
 - **Replay relay:** Registered as `server.RegisterStream("replay")`. Replay player output broadcast to this relay so browsers can subscribe via MoQ for replay monitoring.
-- **Raw YUV pipeline:** Video processing chain (key bridge → compositor) operates on raw YUV420 with a single decode at ingest and single encode at output. Eliminates multi-encode generation loss. TransitionEngine outputs raw YUV via callback; `pipelineCodecs` manages the shared encoder/decoder pool. Zero-CPU passthrough preserved when no processing is active.
+- **Raw YUV pipeline:** Video processing chain (key bridge → compositor) operates on raw YUV420 with a single decode at ingest and single encode at output. Eliminates multi-encode generation loss. TransitionEngine outputs raw YUV via callback; `pipelineCodecs` manages the shared encoder/decoder pool. Always-on re-encode: every program frame flows through decode→encode for consistent SPS/PPS, eliminating browser VideoDecoder reconfigurations at transition boundaries. Audio passthrough optimization is unchanged.
 
 ## Prism Dependency
 
