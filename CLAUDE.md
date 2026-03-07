@@ -162,14 +162,14 @@ ui/                              # SvelteKit frontend (Svelte 5 + TypeScript)
       ProgramPreview.svelte      #   Large preview/program windows with canvas
       PreviewBus.svelte          #   Green preview source buttons
       ProgramBus.svelte          #   Red program source buttons
-      TransitionControls.svelte  #   CUT / AUTO / FTB + type selector (mix/dip/wipe/stinger)
+      TransitionControls.svelte  #   CUT / AUTO / FTB + type selector + stinger upload/delete
       SourceTile.svelte          #   Single source button with tally color + canvas + audio bar
-      AudioMixer.svelte          #   Channel strips: faders, VU meters, PFL/MUTE/AFV, EQ/compressor
+      AudioMixer.svelte          #   Channel strips: faders, VU meters, PFL/MUTE/AFV, EQ/compressor/delay
       KeyboardOverlay.svelte     #   Keyboard shortcut reference (press ?)
-      OutputControls.svelte      #   Header: REC button + SRT status + MODE toggle
+      OutputControls.svelte      #   Header: REC button + SRT status + MODE + CONFIRM toggle
       RecordingControl.svelte    #   Recording start/stop/status
       SRTOutputModal.svelte      #   SRT configuration modal
-      SimpleMode.svelte          #   Volunteer-friendly layout (CUT/DISSOLVE + sources)
+      SimpleMode.svelte          #   Volunteer-friendly layout (CUT/DISSOLVE/FTB + sources + health)
       GraphicsPanel.svelte       #   DSK graphics control panel
       Clock.svelte               #   Live clock display
       ConfirmDialog.svelte       #   Confirmation dialog
@@ -186,6 +186,8 @@ ui/                              # SvelteKit frontend (Svelte 5 + TypeScript)
       OperatorBadge.svelte       #   Operator name/role display badge
       OperatorRegistration.svelte #  Operator registration form (name, role)
       LockIndicator.svelte       #   Subsystem lock status indicator
+      PresetPanel.svelte         #   Preset save/recall/delete panel
+      BottomTabs.svelte          #   Tabbed bottom panel (Audio/Graphics/Macros/Keys/Replay/Presets)
       auto-animation.svelte.ts   #   Auto transition animation state
     lib/layout/                  # Layout mode management
       preferences.ts             #   URL param + localStorage detection/persistence
@@ -203,10 +205,10 @@ Dockerfile                       # Multi-stage build (UI → Go → runtime)
 
 1. **This file** — layout and conventions
 
-## Current State (MVP + Production Hardening — Phases 1-16)
+## Current State (MVP + Production Hardening — Phases 1-19)
 
 - **Branch:** `main`
-- **Tests:** ~800 Go tests + 495 Vitest tests + 45 E2E tests passing with `-race`
+- **Tests:** ~800 Go tests + 562 Vitest tests + 45 E2E tests passing with `-race`
 - **What works:** Everything from Phases 1-5 + Simple Mode (volunteer-friendly layout), video/audio playback pipeline (MoQ → decoder → canvas), PFL audio decode + metering, FTB reverse toggle (smooth fade-in), recording file rotation (time + size), SRT wired to real zsiec/srtgo (pure Go), ring buffer overflow monitoring with reconnect callback, static file embedding (single binary), Dockerfile (multi-stage), GitHub Actions CI, Makefile with dev/build/docker/test targets, `make demo` with 4 simulated cameras (`--demo` flag)
 - **Phase 6 (Instrumentation):** Prometheus metrics, debug snapshot collector, event log, admin endpoints
 - **Phase 7 (Production Hardening):** Source delay buffer, GOP cache, auth middleware, brickwall limiter, async output adapter, codec stubs, DSK graphics compositor
@@ -219,6 +221,9 @@ Dockerfile                       # Multi-stage build (UI → Go → runtime)
 - **Phase 14 (Operator Experience):** Macro system (file-based store, sequential runner, Ctrl+1-9 keyboard triggers), responsive layout (4 breakpoints, touch support), upstream chroma/luma keying in YUV420 domain
 - **Phase 15 (Instant Replay):** Per-source GOP-aligned circular buffers (configurable 1-300s via `--replay-buffer-secs`), mark-in/out with wall-clock precision, variable-speed playback (0.25x-1x) with frame duplication, loop mode, replay relay, 6 API endpoints, ReplayPanel UI component
 - **Phase 16 (Multi-Operator):** Role-based operator management (director/audio/graphics/viewer), subsystem locking (switching/audio/graphics/replay/output), per-operator bearer tokens with session heartbeat, 60s stale timeout with auto lock release, director force-unlock, backward-compatible (all requests pass through when no operators registered), operator store (`~/.switchframe/operators.json`), OperatorBadge/Registration/LockIndicator UI components
+- **Phase 17 (Audio & Video Fixes):** Stereo envelope linking, limited-range YUV black level, limiter/compressor reset on mute, int16 normalization fix, monotonic output PTS, AutoOn compositor guard, graphics setLastOperator, fsync before rotation, mixer hot-path allocation elimination
+- **Phase 18 (UI Layout & Core UX):** Vertical T-bar, multiview height fix, BottomTabs tabbed panel, source position ordering, ATEM-style source label, preview health alarm, peak hold + clip indicator on audio meters
+- **Phase 19 (Missing UI Panels):** PresetPanel (save/recall/delete, 6th BottomTab), source delay slider + badge, stinger upload/delete UI, confirm mode toggle, compressor bypass toggle, complete keyboard overlay, FTB button in simple mode, source health indicators in simple mode
 - **What's stubbed:** Multi-destination SRT (v1.5), ISO per-source recording (v2.5), WebGPU dissolve (Canvas 2D fallback works), replay audio (muted in v1)
 
 ## Key Architecture Decisions
