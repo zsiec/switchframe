@@ -208,7 +208,7 @@ Dockerfile                       # Multi-stage build (UI → Go → runtime)
 ## Current State (MVP + Production Hardening — Phases 1-19)
 
 - **Branch:** `main`
-- **Tests:** ~800 Go tests + 562 Vitest tests + 45 E2E tests passing with `-race`
+- **Tests:** ~1000 Go tests + 562 Vitest tests + 45 E2E tests passing with `-race`
 - **What works:** Everything from Phases 1-5 + Simple Mode (volunteer-friendly layout), video/audio playback pipeline (MoQ → decoder → canvas), PFL audio decode + metering, FTB reverse toggle (smooth fade-in), recording file rotation (time + size), SRT wired to real zsiec/srtgo (pure Go), ring buffer overflow monitoring with reconnect callback, static file embedding (single binary), Dockerfile (multi-stage), GitHub Actions CI, Makefile with dev/build/docker/test targets, `make demo` with 4 simulated cameras (`--demo` flag)
 - **Phase 6 (Instrumentation):** Prometheus metrics, debug snapshot collector, event log, admin endpoints
 - **Phase 7 (Production Hardening):** Source delay buffer, GOP cache, auth middleware, brickwall limiter, async output adapter, codec stubs, DSK graphics compositor
