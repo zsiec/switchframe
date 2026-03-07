@@ -252,7 +252,7 @@ Dockerfile                       # Multi-stage build (UI → Go → runtime)
 - **Commands:** REST POST over HTTP/3 (NOT MoQ custom messages — spec says unknown types cause PROTOCOL_VIOLATION)
 - **State broadcast:** MoQ "control" track with JSON (full snapshot per group for late-join)
 - **Frame routing:** Per-source `sourceViewer` implements `distribution.Viewer`, tags frames with source key. Uses `atomic.Pointer[T]` for lock-free reads on hot path. Switcher forwards only program source's frames to program Relay.
-- **Keyframe gating:** After a cut, video+audio are gated until first IDR from new source to prevent decoder artifacts.
+- **Keyframe gating:** After a cut, the GOP cache replays the new source's recent frames to warm the pipeline decoder, avoiding a keyframe wait. The `pendingIDR` flag is only used as a fallback when no GOP replay is available.
 - **Prism extension:** `ServerConfig.ExtraRoutes` added to Prism for mounting Switchframe's REST API on Prism's mux.
 - **Frontend:** Svelte 5 + SvelteKit with static adapter (for Go binary embed)
 - **Vendored Prism TS:** Transport, decode, render modules copied to ui/src/lib/prism/ for full control
