@@ -123,6 +123,19 @@ server/                          # Go module (github.com/zsiec/switchframe/serve
     wsola.go                     #   WSOLA time-stretching for pitch-preserved slow-motion audio
     interpolator.go              #   FrameInterpolator interface + blend interpolator for slow-mo
     manager.go                   #   Replay orchestration: mark-in/out, play, stop, per-source buffers
+  mxl/                           # MXL shared-memory media transport integration
+    types.go                     #   FlowOpener, DiscreteReader/Writer, ContinuousReader/Writer interfaces
+    cgo.go                       #   Centralized cgo CFLAGS/LDFLAGS (pkg-config: libmxl, build tag: mxl)
+    flow.go                      #   Real cgo implementation: Instance, readers, writers, GC goroutine
+    stub.go                      #   Stub implementation (non-MXL builds): returns ErrMXLNotAvailable
+    discovery.go                 #   Discover(): scan MXL domain for *.mxl-flow dirs, check active status
+    discovery_parse.go           #   parseFlowDef(): NMOS IS-04 flow definition JSON parser
+    reader.go                    #   Reader: videoLoop/audioLoop goroutines, error recovery, PTS tracking
+    writer.go                    #   Writer: steady-rate ticker video output, wall-clock audio indices
+    source.go                    #   Source: MXL flow → triple fan-out (switcher + mixer + browser relay)
+    output.go                    #   Output: program video/audio → MXL shared memory via sink callbacks
+    v210.go                      #   V210↔YUV420p conversion (10-bit 4:2:2 packed ↔ 8-bit 4:2:0 planar)
+    demo.go                      #   DemoVideoReader/DemoAudioReader: synthetic V210+sine test patterns
   demo/                          # Simulated camera sources for demo mode
     source.go                    #   StartSources(): N fake cameras at 30fps
     demux.go                     #   Demo stream demuxer
@@ -231,6 +244,7 @@ Dockerfile                       # Multi-stage build (UI → Go → runtime)
 - **Phase 19 (Missing UI Panels):** PresetPanel (save/recall/delete, 6th BottomTab), source delay slider + badge, stinger upload/delete UI, confirm mode toggle, compressor bypass toggle, complete keyboard overlay, FTB button in simple mode, source health indicators in simple mode
 - **Phase 20 (Replay & Keying Polish):** Replay timecode display (HH:MM:SS.mmm mark-in/out + clip duration), HiDPI canvas for replay monitor, ReplayPanel design system migration (hex → CSS variables), key color picker (green/blue presets + RGB picker with BT.709 YCbCr conversion), load key config on source select
 - **Phase 21 (Broadcast Quality & Feature Completeness):** Video processing channel depth fix (2→4), H.264 colorspace signaling (BT.709), limited-range black level default (Y=16), per-channel biquad EQ state (stereo crosstalk fix), chroma key squared distance + configurable spill replacement color, Lanczos-3 scaler with auto-selection, replay frame blending + interpolator interface, per-source audio delay buffer (lip-sync correction 0-500ms), BS.1770-4 LUFS loudness metering (K-weighted filtering, momentary/short-term/integrated with dual gating), replay audio with WSOLA time-stretching (pitch-preserved slow-motion), multi-destination SRT output (add/remove/start/stop per-destination lifecycle)
+- **MXL Integration:** Shared-memory media transport for uncompressed V210 video + float32 audio. `mxl/` package with cgo bindings (build tag: `mxl`), flow discovery (NMOS IS-04), V210↔YUV420p conversion, Reader/Writer/Source/Output orchestrators. Triple fan-out: raw YUV to switcher, raw PCM to mixer, H.264/AAC encoded to browser relay. Program output routed back to MXL via sink callbacks. `make mxl-demo` runs GStreamer test sources + Switchframe + UI. Stub implementation for non-MXL builds.
 - **What's stubbed:** ISO per-source recording (v2.5), WebGPU dissolve (Canvas 2D fallback works)
 
 ## Key Architecture Decisions
@@ -288,6 +302,7 @@ Dockerfile                       # Multi-stage build (UI → Go → runtime)
 - **WSOLA time-stretching:** Waveform Similarity Overlap-Add for pitch-preserved audio slow-motion. Hann window overlap-add with normalized cross-correlation search. Window size 1024 samples, search range 256. Passthrough at 1.0x speed.
 - **Lanczos-3 scaler:** Broadcast-quality Lanczos-3 kernel scaler with sinc-based interpolation. Auto-selected for quality scaling (transitions, replay), bilinear used for speed-critical paths. `ScaleYUV420WithQuality(quality)` factory function.
 - **Multi-destination SRT:** Per-destination `OutputDestination` with independent lifecycle (add/remove/start/stop). Each destination gets its own `AsyncAdapter` wrapper. CRUD API at `/api/output/destinations`. Destinations included in adapter fan-out via `rebuildAdaptersLocked()`. State change callbacks trigger ControlRoomState broadcast.
+- **MXL integration:** Shared-memory media transport via `server/mxl/` package. Build tags: `cgo && mxl`. Uses `pkg-config: libmxl` with `MXL_ROOT` pointing to SDK install. `FlowOpener` interface abstracts cgo/stub implementations. Sources bypass Prism relay path — `RegisterMXLSource()` creates `sourceState` with nil relay, frames arrive via `IngestRawVideo()` (raw YUV420p) and `IngestPCM()` (float32). Triple fan-out per source: (1) raw YUV to switcher pipeline, (2) raw PCM to audio mixer (skips AAC decode), (3) H.264/AAC encoded to per-source browser relay. V210↔YUV420p conversion handles 10-bit 4:2:2 to 8-bit 4:2:0 with chroma downsampling. Writer uses steady-rate ticker model (decoupled from pipeline callback rate) for video and wall-clock indices with monotonic enforcement for audio. Audio reader uses 5ms timeout to prevent SDK thread starvation. Discovery via NMOS IS-04 `flow_def.json` files. `--mxl-discover` lists available flows and exits. MXL sources prefixed with `mxl:` and excluded from Prism stream registration callbacks. Stub implementation (`!cgo || !mxl`) returns `ErrMXLNotAvailable` with monotonic clock `CurrentIndex` approximation.
 
 ## Prism Dependency
 
