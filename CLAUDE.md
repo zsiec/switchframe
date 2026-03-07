@@ -287,7 +287,7 @@ Dockerfile                       # Multi-stage build (UI → Go → runtime)
 - **LUFS loudness metering:** BS.1770-4 compliant K-weighted loudness meter. Two-stage K-weighting (head-related shelf + RLB biquad). Three windows: momentary (400ms), short-term (3s), integrated (dual gating: absolute -70 LUFS + relative -10 LU). Fed after master fader, before limiter. EBU R128 color coding in UI (green ≤-23, yellow ≤-14, red above).
 - **WSOLA time-stretching:** Waveform Similarity Overlap-Add for pitch-preserved audio slow-motion. Hann window overlap-add with normalized cross-correlation search. Window size 1024 samples, search range 256. Passthrough at 1.0x speed.
 - **Lanczos-3 scaler:** Broadcast-quality Lanczos-3 kernel scaler with sinc-based interpolation. Auto-selected for quality scaling (transitions, replay), bilinear used for speed-critical paths. `ScaleYUV420WithQuality(quality)` factory function.
-- **Multi-destination SRT:** Per-destination `OutputDestination` with independent lifecycle (add/remove/start/stop). Each destination gets its own `AsyncAdapter` wrapper. CRUD API at `/api/destinations`. Destinations included in adapter fan-out via `rebuildAdaptersLocked()`. State change callbacks trigger ControlRoomState broadcast.
+- **Multi-destination SRT:** Per-destination `OutputDestination` with independent lifecycle (add/remove/start/stop). Each destination gets its own `AsyncAdapter` wrapper. CRUD API at `/api/output/destinations`. Destinations included in adapter fan-out via `rebuildAdaptersLocked()`. State change callbacks trigger ControlRoomState broadcast.
 
 ## Prism Dependency
 
