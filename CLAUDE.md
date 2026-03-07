@@ -205,10 +205,10 @@ Dockerfile                       # Multi-stage build (UI → Go → runtime)
 
 1. **This file** — layout and conventions
 
-## Current State (MVP + Production Hardening — Phases 1-19)
+## Current State (MVP + Production Hardening — Phases 1-20)
 
 - **Branch:** `main`
-- **Tests:** ~1000 Go tests + 562 Vitest tests + 45 E2E tests passing with `-race`
+- **Tests:** ~1000 Go tests + 575 Vitest tests + 45 E2E tests passing with `-race`
 - **What works:** Everything from Phases 1-5 + Simple Mode (volunteer-friendly layout), video/audio playback pipeline (MoQ → decoder → canvas), PFL audio decode + metering, FTB reverse toggle (smooth fade-in), recording file rotation (time + size), SRT wired to real zsiec/srtgo (pure Go), ring buffer overflow monitoring with reconnect callback, static file embedding (single binary), Dockerfile (multi-stage), GitHub Actions CI, Makefile with dev/build/docker/test targets, `make demo` with 4 simulated cameras (`--demo` flag)
 - **Phase 6 (Instrumentation):** Prometheus metrics, debug snapshot collector, event log, admin endpoints
 - **Phase 7 (Production Hardening):** Source delay buffer, GOP cache, auth middleware, brickwall limiter, async output adapter, codec stubs, DSK graphics compositor
@@ -224,6 +224,7 @@ Dockerfile                       # Multi-stage build (UI → Go → runtime)
 - **Phase 17 (Audio & Video Fixes):** Stereo envelope linking, limited-range YUV black level, limiter/compressor reset on mute, int16 normalization fix, monotonic output PTS, AutoOn compositor guard, graphics setLastOperator, fsync before rotation, mixer hot-path allocation elimination
 - **Phase 18 (UI Layout & Core UX):** Vertical T-bar, multiview height fix, BottomTabs tabbed panel, source position ordering, ATEM-style source label, preview health alarm, peak hold + clip indicator on audio meters
 - **Phase 19 (Missing UI Panels):** PresetPanel (save/recall/delete, 6th BottomTab), source delay slider + badge, stinger upload/delete UI, confirm mode toggle, compressor bypass toggle, complete keyboard overlay, FTB button in simple mode, source health indicators in simple mode
+- **Phase 20 (Replay & Keying Polish):** Replay timecode display (HH:MM:SS.mmm mark-in/out + clip duration), HiDPI canvas for replay monitor, ReplayPanel design system migration (hex → CSS variables), key color picker (green/blue presets + RGB picker with BT.709 YCbCr conversion), load key config on source select
 - **What's stubbed:** Multi-destination SRT (v1.5), ISO per-source recording (v2.5), WebGPU dissolve (Canvas 2D fallback works), replay audio (muted in v1)
 
 ## Key Architecture Decisions
