@@ -44,6 +44,7 @@ server/                          # Go module (github.com/zsiec/switchframe/serve
     limiter.go                   #   Brickwall limiter at -1 dBFS
     eq.go                        #   3-band parametric EQ (RBJ biquad, Direct Form II Transposed)
     compressor.go                #   Single-band compressor (envelope follower, makeup gain)
+    loudness.go                  #   BS.1770-4 LUFS meter (K-weighting, momentary/short-term/integrated)
     stub_codec.go                #   No-op codec stubs (non-cgo builds)
   control/                       # REST API + state broadcast
     api.go                       #   HTTP handlers: cut, preview, transition, FTB, audio, recording,
@@ -60,6 +61,7 @@ server/                          # Go module (github.com/zsiec/switchframe/serve
     codec.go                     #   VideoDecoder/VideoEncoder interfaces + mocks
     types.go                     #   TransitionType/TransitionState/WipeDirection constants
     scaler.go                    #   Pure Go bilinear YUV420 scaler for resolution mismatch
+    scaler_lanczos.go            #   Lanczos-3 kernel scaler for broadcast-quality scaling
   output/                        # Recording + SRT output engine
     manager.go                   #   OutputManager: lifecycle, viewer, fan-out, confidence monitor
     muxer.go                     #   TSMuxer: MPEG-TS muxing (go-astits)
@@ -73,6 +75,7 @@ server/                          # Go module (github.com/zsiec/switchframe/serve
     srt_wire.go                  #   Real srtgo connection wrappers
     ringbuf.go                   #   Ring buffer for SRT reconnection
     async_adapter.go             #   Async write adapter (non-blocking output)
+    destination.go               #   Multi-destination types and lifecycle (DestinationConfig/Status)
   stinger/                       # Stinger transition clips
     store.go                     #   StingerStore: load/upload/delete PNG sequences, path traversal
                                  #     prevention, maxClips limit, sentinel errors
@@ -117,6 +120,8 @@ server/                          # Go module (github.com/zsiec/switchframe/serve
     buffer.go                    #   Per-source GOP-aligned circular buffer with wall-clock clipping
     viewer.go                    #   distribution.Viewer for capturing source frames to buffer
     player.go                    #   Decode → re-encode pipeline with frame duplication for slow-mo
+    wsola.go                     #   WSOLA time-stretching for pitch-preserved slow-motion audio
+    interpolator.go              #   FrameInterpolator interface + blend interpolator for slow-mo
     manager.go                   #   Replay orchestration: mark-in/out, play, stop, per-source buffers
   demo/                          # Simulated camera sources for demo mode
     source.go                    #   StartSources(): N fake cameras at 30fps
@@ -205,10 +210,10 @@ Dockerfile                       # Multi-stage build (UI → Go → runtime)
 
 1. **This file** — layout and conventions
 
-## Current State (MVP + Production Hardening — Phases 1-20)
+## Current State (MVP + Production Hardening — Phases 1-21)
 
 - **Branch:** `main`
-- **Tests:** ~1000 Go tests + 575 Vitest tests + 45 E2E tests passing with `-race`
+- **Tests:** ~1100 Go tests + 575 Vitest tests + 45 E2E tests passing with `-race`
 - **What works:** Everything from Phases 1-5 + Simple Mode (volunteer-friendly layout), video/audio playback pipeline (MoQ → decoder → canvas), PFL audio decode + metering, FTB reverse toggle (smooth fade-in), recording file rotation (time + size), SRT wired to real zsiec/srtgo (pure Go), ring buffer overflow monitoring with reconnect callback, static file embedding (single binary), Dockerfile (multi-stage), GitHub Actions CI, Makefile with dev/build/docker/test targets, `make demo` with 4 simulated cameras (`--demo` flag)
 - **Phase 6 (Instrumentation):** Prometheus metrics, debug snapshot collector, event log, admin endpoints
 - **Phase 7 (Production Hardening):** Source delay buffer, GOP cache, auth middleware, brickwall limiter, async output adapter, codec stubs, DSK graphics compositor
@@ -225,7 +230,8 @@ Dockerfile                       # Multi-stage build (UI → Go → runtime)
 - **Phase 18 (UI Layout & Core UX):** Vertical T-bar, multiview height fix, BottomTabs tabbed panel, source position ordering, ATEM-style source label, preview health alarm, peak hold + clip indicator on audio meters
 - **Phase 19 (Missing UI Panels):** PresetPanel (save/recall/delete, 6th BottomTab), source delay slider + badge, stinger upload/delete UI, confirm mode toggle, compressor bypass toggle, complete keyboard overlay, FTB button in simple mode, source health indicators in simple mode
 - **Phase 20 (Replay & Keying Polish):** Replay timecode display (HH:MM:SS.mmm mark-in/out + clip duration), HiDPI canvas for replay monitor, ReplayPanel design system migration (hex → CSS variables), key color picker (green/blue presets + RGB picker with BT.709 YCbCr conversion), load key config on source select
-- **What's stubbed:** Multi-destination SRT (v1.5), ISO per-source recording (v2.5), WebGPU dissolve (Canvas 2D fallback works), replay audio (muted in v1)
+- **Phase 21 (Broadcast Quality & Feature Completeness):** Video processing channel depth fix (2→4), H.264 colorspace signaling (BT.709), limited-range black level default (Y=16), per-channel biquad EQ state (stereo crosstalk fix), chroma key squared distance + configurable spill replacement color, Lanczos-3 scaler with auto-selection, replay frame blending + interpolator interface, per-source audio delay buffer (lip-sync correction 0-500ms), BS.1770-4 LUFS loudness metering (K-weighted filtering, momentary/short-term/integrated with dual gating), replay audio with WSOLA time-stretching (pitch-preserved slow-motion), multi-destination SRT output (add/remove/start/stop per-destination lifecycle)
+- **What's stubbed:** ISO per-source recording (v2.5), WebGPU dissolve (Canvas 2D fallback works)
 
 ## Key Architecture Decisions
 
@@ -274,10 +280,14 @@ Dockerfile                       # Multi-stage build (UI → Go → runtime)
 - **Macro system:** File-based JSON store at `~/.switchframe/macros.json` (mirrors `preset/store.go` pattern). `MacroTarget` interface for testability. Sequential executor with `time.After` + `ctx.Done` select for wait/cancellation.
 - **Responsive layout:** CSS-only media queries at 4 breakpoints (1920/1024/768px). `@media (pointer: coarse)` for 44px touch targets. AudioMixer collapses below 1024px.
 - **Upstream keying:** Chroma/luma key generation in YUV420 domain (matches blend architecture). `KeyProcessor` applies per-source key chain before DSK compositing. Cb/Cr distance for chroma, Y threshold for luma, with smoothness feathering.
-- **Instant replay:** Per-source GOP-aligned circular buffers with wall-clock clipping. `replayBuffer.ExtractClip(inTime, outTime)` finds nearest GOP keyframe. Player decodes clip, sorts by PTS, estimates FPS, re-encodes with frame duplication for slow-mo (`dupCount = ceil(1/speed)`). Output paced at source FPS via timers. Replay routed to dedicated `"replay"` relay registered via `server.RegisterStream("replay")`. Audio muted in v1.
+- **Instant replay:** Per-source GOP-aligned circular buffers with wall-clock clipping. `replayBuffer.ExtractClip(inTime, outTime)` returns video frames + audio frames. Player decodes clip, sorts by PTS, estimates FPS, re-encodes with frame duplication for slow-mo (`dupCount = ceil(1/speed)`). Audio time-stretched via WSOLA for pitch-preserved slow-motion. Frame blending via pluggable `FrameInterpolator` interface (default: alpha blend). Output paced at source FPS via timers. Replay routed to dedicated `"replay"` relay registered via `server.RegisterStream("replay")`.
 - **Operator management:** File-based operator store at `~/.switchframe/operators.json`. 4 roles (director/audio/graphics/viewer) with 5 lockable subsystems (switching/audio/graphics/replay/output). Per-operator 64-char hex bearer tokens. `SessionManager` tracks heartbeats with 60s stale timeout and 15s cleanup interval. `OperatorMiddleware` enforces role permission + lock ownership on every command (GET requests exempt). Backward-compatible: no operators registered = all requests pass through.
 - **Replay relay:** Registered as `server.RegisterStream("replay")`. Replay player output broadcast to this relay so browsers can subscribe via MoQ for replay monitoring.
 - **Raw YUV pipeline:** Video processing chain (key bridge → compositor) operates on raw YUV420 with a single decode at ingest and single encode at output. Eliminates multi-encode generation loss. TransitionEngine outputs raw YUV via callback; `pipelineCodecs` manages the shared encoder/decoder pool. Always-on re-encode: every program frame flows through decode→encode for consistent SPS/PPS, eliminating browser VideoDecoder reconfigurations at transition boundaries. Audio passthrough optimization is unchanged.
+- **LUFS loudness metering:** BS.1770-4 compliant K-weighted loudness meter. Two-stage K-weighting (head-related shelf + RLB biquad). Three windows: momentary (400ms), short-term (3s), integrated (dual gating: absolute -70 LUFS + relative -10 LU). Fed after master fader, before limiter. EBU R128 color coding in UI (green ≤-23, yellow ≤-14, red above).
+- **WSOLA time-stretching:** Waveform Similarity Overlap-Add for pitch-preserved audio slow-motion. Hann window overlap-add with normalized cross-correlation search. Window size 1024 samples, search range 256. Passthrough at 1.0x speed.
+- **Lanczos-3 scaler:** Broadcast-quality Lanczos-3 kernel scaler with sinc-based interpolation. Auto-selected for quality scaling (transitions, replay), bilinear used for speed-critical paths. `ScaleYUV420WithQuality(quality)` factory function.
+- **Multi-destination SRT:** Per-destination `OutputDestination` with independent lifecycle (add/remove/start/stop). Each destination gets its own `AsyncAdapter` wrapper. CRUD API at `/api/destinations`. Destinations included in adapter fan-out via `rebuildAdaptersLocked()`. State change callbacks trigger ControlRoomState broadcast.
 
 ## Prism Dependency
 
