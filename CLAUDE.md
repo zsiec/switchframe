@@ -29,6 +29,8 @@ server/                          # Go module (github.com/zsiec/switchframe/serve
     embed_prod.go                #   Static file embedding (build tag: embed_ui)
     embed_dev.go                 #   No-op handler (default, dev mode)
     admin.go                     #   Admin/debug HTTP endpoints + cert-hash bootstrap
+    app_codec.go                 #   Codec factory functions for decoders/encoders
+    app_mxl_demo.go              #   MXL demo source orchestration (synthetic V210/PCM)
   switcher/                      # Core switching engine
     switcher.go                  #   State machine: Cut(), SetPreview(), frame routing, audio handler
     source_viewer.go             #   Per-source Viewer proxy (atomic.Pointer for lock-free hot path, srcDecoder for always-decode)
@@ -38,6 +40,12 @@ server/                          # Go module (github.com/zsiec/switchframe/serve
     delay_buffer.go              #   Per-source frame delay buffer (0-500ms)
     processing_frame.go          #   ProcessingFrame: raw YUV420 carrier through pipeline
     pipeline_codecs.go           #   Encoder-only pool for video processing chain (decoders moved to per-source)
+    format.go                    #   Video format definitions (resolution/fps presets)
+    frc.go                       #   Frame rate conversion engine base
+    frc_me.go                    #   FRC motion estimation (MCFI)
+    frc_warp.go                  #   FRC frame warping
+    frcasm/                      #   SIMD SAD kernels (amd64/arm64 assembly)
+    types.go                     #   Switcher internal types
   audio/                         # Audio mixing engine
     mixer.go                     #   Per-channel decode/mix/encode, passthrough optimization
     codec.go                     #   AudioDecoder/AudioEncoder interfaces + factory types
@@ -50,6 +58,8 @@ server/                          # Go module (github.com/zsiec/switchframe/serve
     eq.go                        #   3-band parametric EQ (RBJ biquad, Direct Form II Transposed)
     compressor.go                #   Single-band compressor (envelope follower, makeup gain)
     loudness.go                  #   BS.1770-4 LUFS meter (K-weighting, momentary/short-term/integrated)
+    normalize.go                 #   Audio level normalization utilities
+    types.go                     #   Audio channel types and enums
     stub_codec.go                #   No-op codec stubs (non-cgo builds)
   control/                       # REST API + state broadcast
     api.go                       #   Core API: interfaces, options, struct, routing, cut/preview/state
@@ -68,6 +78,7 @@ server/                          # Go module (github.com/zsiec/switchframe/serve
     cors.go                      #   CORS middleware for cross-origin API access
     middleware.go                #   HTTP middleware (logging, auth, metrics)
     api_format.go                #   Format preset API: GET/PUT /api/format
+    errmap.go                    #   Error code mapping utilities
   transition/                    # Transition engine
     engine.go                    #   TransitionEngine lifecycle (start/ingest/complete/abort)
     blend.go                     #   YUV420 blending (mix, dip, wipe, FTB, stinger)
@@ -76,6 +87,7 @@ server/                          # Go module (github.com/zsiec/switchframe/serve
     types.go                     #   TransitionType/TransitionState/WipeDirection constants
     scaler.go                    #   Pure Go bilinear YUV420 scaler for resolution mismatch
     scaler_lanczos.go            #   Lanczos-3 kernel scaler for broadcast-quality scaling
+    easing.go                    #   Transition easing curves (smoothstep, ease-in/out)
   output/                        # Recording + SRT output engine
     manager.go                   #   OutputManager: lifecycle, viewer, fan-out, confidence monitor
     muxer.go                     #   TSMuxer: MPEG-TS muxing (go-astits)
@@ -249,7 +261,7 @@ Dockerfile                       # Multi-stage build (UI → Go → runtime)
 ## Current State (MVP + Production Hardening — Phases 1-23)
 
 - **Branch:** `main`
-- **Tests:** ~1345 Go tests + 590 Vitest tests + 47 E2E tests passing with `-race`
+- **Tests:** ~1469 Go tests + 624 Vitest tests + 47 E2E tests passing with `-race`
 - **What works:** Everything from Phases 1-5 + Simple Mode (volunteer-friendly layout), video/audio playback pipeline (MoQ → decoder → canvas), PFL audio decode + metering, FTB reverse toggle (smooth fade-in), recording file rotation (time + size), SRT wired to real zsiec/srtgo (pure Go), ring buffer overflow monitoring with reconnect callback, static file embedding (single binary), Dockerfile (multi-stage), GitHub Actions CI, Makefile with dev/build/docker/test targets, `make demo` with 4 simulated cameras (`--demo` flag)
 - **Phase 6 (Instrumentation):** Prometheus metrics, debug snapshot collector, event log, admin endpoints
 - **Phase 7 (Production Hardening):** Source delay buffer, auth middleware, brickwall limiter, async output adapter, codec stubs, DSK graphics compositor
@@ -270,7 +282,7 @@ Dockerfile                       # Multi-stage build (UI → Go → runtime)
 - **Phase 22 (Performance Hardening):** Buffer-reuse APIs for NALU conversion (`AVC1ToAnnexBInto`, `PrependSPSPPSInto`), crossfade lookup table + `Into` variants, per-source frame sync locks, `statsMu` removal (atomic `lastGroupID`), sync.Pool for AVC1 buffers, deep-copy YUV before async enqueue (race fix), frame deadline monitoring, `videoProcCh` buffer 4→8, cache line padding on source viewer atomics, lock-free delay buffer callbacks, wipe/stinger direct chroma alpha + SIMD `blendAlpha` for chroma planes, mixer hot-path allocation elimination (crossfade/MXL sink buffers), mix accumulation loop BCE optimization, `GOGC=400` default, system tuning check (`RLIMIT_NOFILE`), TSMuxer buffer reuse
 - **Phase 23 (Always-Decode Architecture):** Per-source H.264→YUV420 decoder goroutines (`source_decoder.go`), switcher operates entirely on decoded frames, GOP cache / pendingIDR / replayGOP / feedDeltaFrames deleted, transition engine receives raw YUV (no decoder warmup), upstream key bridge uses `IngestFillYUV` (no H.264 decode), pipeline_codecs is encoder-only, enabled via `--decode-all-sources` CLI flag, per-source decoders inherit hardware acceleration (VideoToolbox/VA-API/NVDEC) automatically
 - **MXL Integration:** Shared-memory media transport for uncompressed V210 video + float32 audio. `mxl/` package with cgo bindings (build tag: `mxl`), flow discovery (NMOS IS-04), V210↔YUV420p conversion, Reader/Writer/Source/Output orchestrators. Triple fan-out: raw YUV to switcher, raw PCM to mixer, H.264/AAC encoded to browser relay. Program output routed back to MXL via sink callbacks. `make mxl-demo` runs GStreamer test sources + Switchframe + UI. Stub implementation for non-MXL builds.
-- **Phase 24 (Low-Latency Control + Raw Monitor):** HTTP/3 control commands via QUIC (replacing TCP :8081 default), MoQ control track wiring (event-driven state push replacing 500ms polling), CORS middleware on ExtraRoutes, cert-hash on admin server for dev bootstrapping, `--http-fallback` opt-in TCP :8081, API base URL routing (`base-url.ts`), mkcert support (`--tls-cert`/`--tls-key`, `make setup-mkcert`), raw YUV420 program monitor (`--raw-program-monitor`, `--raw-monitor-scale`), WebGL YUV→RGB renderer (`yuv-renderer.ts`), `program-raw` MoQ track with 8-byte header + planar YUV, format preset API (`GET/PUT /api/format`), easing curves for transitions
+- **Phase 24 (Low-Latency Control + Raw Monitor):** HTTP/3 control commands via QUIC (replacing TCP :8081 default), MoQ control track wiring (event-driven state push replacing 500ms polling), CORS middleware on ExtraRoutes, cert-hash on admin server for dev bootstrapping, `--http-fallback` opt-in TCP :8081, API base URL routing (`base-url.ts`), mkcert support (`--tls-cert`/`--tls-key`, `make setup-mkcert`), raw YUV420 program monitor (`--raw-program-monitor`, `--raw-monitor-scale`), WebGL YUV→RGB renderer (`yuv-renderer.ts`), `program-raw` MoQ track with 8-byte header + planar YUV, format preset API (`GET/PUT /api/format`), easing curves for transitions, frame rate conversion with MCFI + SIMD SAD kernels (`--frc-quality`)
 - **What's stubbed:** ISO per-source recording (v2.5), WebGPU dissolve (Canvas 2D fallback works)
 
 ## Key Architecture Decisions
@@ -349,6 +361,8 @@ Dockerfile                       # Multi-stage build (UI → Go → runtime)
 - **Raw YUV program monitor:** `--raw-program-monitor` registers a `"program-raw"` MoQ track carrying raw YUV420. Wire format: `[uint32 BE width][uint32 BE height][Y plane W×H][Cb plane W/2×H/2][Cr plane W/2×H/2]`. Every frame is keyframe (no inter-frame deps). `--raw-monitor-scale` optionally downscales (720p/480p/360p) via `transition.ScaleYUV420`. Second `rawMonitorSink` on switcher tapped alongside MXL sink before H.264 encode. Browser's `yuv-renderer.ts` provides WebGL2/WebGL shader for BT.709 limited-range YUV→RGB conversion. Pipeline manager prefers `program-raw` over `program` when `isRawYUVSource` returns true. Bypasses H.264 encode+decode for ~4ms total latency vs ~15ms with codec round-trip.
 - **API base URL routing:** `ui/src/lib/api/base-url.ts` provides `resolveApiUrl(path)` prepending the QUIC server origin. Empty string in production (same-origin). Set from `fetchServerInfo()` in `onMount` when server reports `trusted: true` and origin differs from page. All `fetch()` calls in `switch-api.ts` and `transport-utils.ts` go through `resolveApiUrl`.
 - **Format presets API:** `GET /api/format` returns current pipeline format and available presets. `PUT /api/format` accepts preset name or custom `{width, height, fpsNum, fpsDen}`.
+- **Frame rate conversion (FRC):** Optional frame rate conversion with 4 quality levels: `none` (passthrough), `nearest` (nearest-frame), `blend` (alpha blend), `mcfi` (motion-compensated frame interpolation with SIMD SAD kernels in `frcasm/`). Enabled via `--frc-quality` flag. `make demo` defaults to `mcfi`. Works with the frame synchronizer to normalize mixed-rate sources to the pipeline format.
+- **Platform SIMD kernels:** Graphics (alpha blend, chroma key, luma key) and transitions (blend, downsample, scaler, Lanczos) have platform-specific SIMD implementations for amd64 and arm64 with generic Go fallbacks. FRC uses hand-written assembly SAD kernels in `switcher/frcasm/`.
 
 ## Prism Dependency
 
