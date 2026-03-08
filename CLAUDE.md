@@ -48,9 +48,16 @@ server/                          # Go module (github.com/zsiec/switchframe/serve
     loudness.go                  #   BS.1770-4 LUFS meter (K-weighting, momentary/short-term/integrated)
     stub_codec.go                #   No-op codec stubs (non-cgo builds)
   control/                       # REST API + state broadcast
-    api.go                       #   HTTP handlers: cut, preview, transition, FTB, audio, recording,
-                                 #     SRT, confidence, presets, stinger, graphics, macros, replay,
-                                 #     operators, keying, debug
+    api.go                       #   Core API: interfaces, options, struct, routing, cut/preview/state
+    api_audio.go                 #   Audio handlers: trim, level, mute, AFV, master, EQ, compressor, delay
+    api_transition.go            #   Transition handlers: start, position, FTB
+    api_source.go                #   Source handlers: label, delay, position, list
+    api_output.go                #   Output handlers: recording, SRT, confidence, destinations
+    api_graphics.go              #   Graphics/stinger handlers: on/off, frame upload, stinger CRUD
+    api_preset.go                #   Preset handlers: CRUD, recall, stateToSnapshot
+    api_macro.go                 #   Macro handlers: CRUD, run
+    api_replay.go                #   Replay handlers: mark-in/out, play, stop, status, sources
+    api_keying.go                #   Upstream key handlers: set/get/delete source key
     api_operator.go              #   Operator management HTTP handlers (register, lock, heartbeat)
     state.go                     #   StatePublisher (JSON serialize -> callback)
     auth.go                      #   API key authentication
@@ -234,7 +241,7 @@ Dockerfile                       # Multi-stage build (UI → Go → runtime)
 ## Current State (MVP + Production Hardening — Phases 1-22)
 
 - **Branch:** `main`
-- **Tests:** ~1336 Go tests + 590 Vitest tests + 47 E2E tests passing with `-race`
+- **Tests:** ~1345 Go tests + 590 Vitest tests + 47 E2E tests passing with `-race`
 - **What works:** Everything from Phases 1-5 + Simple Mode (volunteer-friendly layout), video/audio playback pipeline (MoQ → decoder → canvas), PFL audio decode + metering, FTB reverse toggle (smooth fade-in), recording file rotation (time + size), SRT wired to real zsiec/srtgo (pure Go), ring buffer overflow monitoring with reconnect callback, static file embedding (single binary), Dockerfile (multi-stage), GitHub Actions CI, Makefile with dev/build/docker/test targets, `make demo` with 4 simulated cameras (`--demo` flag)
 - **Phase 6 (Instrumentation):** Prometheus metrics, debug snapshot collector, event log, admin endpoints
 - **Phase 7 (Production Hardening):** Source delay buffer, GOP cache, auth middleware, brickwall limiter, async output adapter, codec stubs, DSK graphics compositor
