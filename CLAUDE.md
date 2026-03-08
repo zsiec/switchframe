@@ -6,6 +6,7 @@ Browser-based live video switcher built on [Prism](https://github.com/zsiec/pris
 
 ```bash
 make demo                                  # 4 simulated cameras, open localhost:5173
+make setup-mkcert                          # one-time: trusted HTTPS cert for HTTP/3 dev
 cd server && go build ./cmd/switchframe    # build
 cd server && go test ./... -race           # test
 make build                                 # build to bin/switchframe
@@ -20,11 +21,14 @@ make test-all                              # run all tests
 
 ```
 server/                          # Go module (github.com/zsiec/switchframe/server)
-  cmd/switchframe/main.go        # Binary entry point (standalone HTTP on :8080)
+  cmd/switchframe/main.go        # Binary entry point (QUIC/HTTP3 on :8080)
     app.go                       #   Application init, system tuning checks, GC tuning
+    app_http.go                  #   HTTP/1.1 fallback server (--http-fallback, TCP :8081)
+    app_streams.go               #   Stream registration callbacks (source filtering)
+    app_state.go                 #   State enrichment + broadcast wiring
     embed_prod.go                #   Static file embedding (build tag: embed_ui)
     embed_dev.go                 #   No-op handler (default, dev mode)
-    admin.go                     #   Admin/debug HTTP endpoints
+    admin.go                     #   Admin/debug HTTP endpoints + cert-hash bootstrap
   switcher/                      # Core switching engine
     switcher.go                  #   State machine: Cut(), SetPreview(), frame routing, audio handler
     source_viewer.go             #   Per-source Viewer proxy (atomic.Pointer for lock-free hot path, srcDecoder for always-decode)
@@ -61,7 +65,9 @@ server/                          # Go module (github.com/zsiec/switchframe/serve
     api_operator.go              #   Operator management HTTP handlers (register, lock, heartbeat)
     state.go                     #   StatePublisher (JSON serialize -> callback)
     auth.go                      #   API key authentication
+    cors.go                      #   CORS middleware for cross-origin API access
     middleware.go                #   HTTP middleware (logging, auth, metrics)
+    api_format.go                #   Format preset API: GET/PUT /api/format
   transition/                    # Transition engine
     engine.go                    #   TransitionEngine lifecycle (start/ingest/complete/abort)
     blend.go                     #   YUV420 blending (mix, dip, wipe, FTB, stinger)
@@ -157,6 +163,7 @@ ui/                              # SvelteKit frontend (Svelte 5 + TypeScript)
         types.ts                 #   ControlRoomState, SourceInfo, TallyStatus, AudioChannel types
         switch-api.ts            #   Full REST client: cut, preview, transition, audio (EQ/compressor),
                                  #     presets, stinger, recording, SRT, graphics, macros, keying
+        base-url.ts              #   API base URL routing (same-origin prod, QUIC origin dev)
       state/                     # Reactive state management
         control-room.svelte.ts   #   Svelte 5 $state store with MoQ update handler
         notifications.svelte.ts  #   Toast notification state
@@ -173,6 +180,7 @@ ui/                              # SvelteKit frontend (Svelte 5 + TypeScript)
         dissolve.ts              #   WebGPU dissolve renderer + Canvas 2D fallback
         dissolve-fallback.ts     #   Canvas 2D dissolve/dip rendering
         canvas-utils.ts          #   Canvas helper utilities
+        yuv-renderer.ts          #   WebGL YUV420→RGB renderer for raw program monitor
       audio/                     # Client-side audio
         pfl.ts                   #   PFL manager (per-source solo monitoring)
         pfl-toggle.ts            #   PFL toggle utility
@@ -262,6 +270,7 @@ Dockerfile                       # Multi-stage build (UI → Go → runtime)
 - **Phase 22 (Performance Hardening):** Buffer-reuse APIs for NALU conversion (`AVC1ToAnnexBInto`, `PrependSPSPPSInto`), crossfade lookup table + `Into` variants, per-source frame sync locks, `statsMu` removal (atomic `lastGroupID`), sync.Pool for AVC1 buffers, deep-copy YUV before async enqueue (race fix), frame deadline monitoring, `videoProcCh` buffer 4→8, cache line padding on source viewer atomics, lock-free delay buffer callbacks, wipe/stinger direct chroma alpha + SIMD `blendAlpha` for chroma planes, mixer hot-path allocation elimination (crossfade/MXL sink buffers), mix accumulation loop BCE optimization, `GOGC=400` default, system tuning check (`RLIMIT_NOFILE`), TSMuxer buffer reuse
 - **Phase 23 (Always-Decode Architecture):** Per-source H.264→YUV420 decoder goroutines (`source_decoder.go`), switcher operates entirely on decoded frames, GOP cache / pendingIDR / replayGOP / feedDeltaFrames deleted, transition engine receives raw YUV (no decoder warmup), upstream key bridge uses `IngestFillYUV` (no H.264 decode), pipeline_codecs is encoder-only, enabled via `--decode-all-sources` CLI flag, per-source decoders inherit hardware acceleration (VideoToolbox/VA-API/NVDEC) automatically
 - **MXL Integration:** Shared-memory media transport for uncompressed V210 video + float32 audio. `mxl/` package with cgo bindings (build tag: `mxl`), flow discovery (NMOS IS-04), V210↔YUV420p conversion, Reader/Writer/Source/Output orchestrators. Triple fan-out: raw YUV to switcher, raw PCM to mixer, H.264/AAC encoded to browser relay. Program output routed back to MXL via sink callbacks. `make mxl-demo` runs GStreamer test sources + Switchframe + UI. Stub implementation for non-MXL builds.
+- **Phase 24 (Low-Latency Control + Raw Monitor):** HTTP/3 control commands via QUIC (replacing TCP :8081 default), MoQ control track wiring (event-driven state push replacing 500ms polling), CORS middleware on ExtraRoutes, cert-hash on admin server for dev bootstrapping, `--http-fallback` opt-in TCP :8081, API base URL routing (`base-url.ts`), mkcert support (`--tls-cert`/`--tls-key`, `make setup-mkcert`), raw YUV420 program monitor (`--raw-program-monitor`, `--raw-monitor-scale`), WebGL YUV→RGB renderer (`yuv-renderer.ts`), `program-raw` MoQ track with 8-byte header + planar YUV, format preset API (`GET/PUT /api/format`), easing curves for transitions
 - **What's stubbed:** ISO per-source recording (v2.5), WebGPU dissolve (Canvas 2D fallback works)
 
 ## Key Architecture Decisions
@@ -334,6 +343,12 @@ Dockerfile                       # Multi-stage build (UI → Go → runtime)
 - **GC tuning:** `debug.SetGCPercent(400)` in `init()` if `GOGC` env not set. Reduces GC frequency for real-time frame processing.
 - **System tuning check:** `logSystemTuning()` checks `RLIMIT_NOFILE` at startup, warns if below 65536.
 - **MXL integration:** Shared-memory media transport via `server/mxl/` package. Build tags: `cgo && mxl`. Uses `pkg-config: libmxl` with `MXL_ROOT` pointing to SDK install. `FlowOpener` interface abstracts cgo/stub implementations. Sources bypass Prism relay path — `RegisterMXLSource()` creates `sourceState` with nil relay, frames arrive via `IngestRawVideo()` (raw YUV420p) and `IngestPCM()` (float32). Triple fan-out per source: (1) raw YUV to switcher pipeline, (2) raw PCM to audio mixer (skips AAC decode), (3) H.264/AAC encoded to per-source browser relay. V210↔YUV420p conversion handles 10-bit 4:2:2 to 8-bit 4:2:0 with chroma downsampling. Writer uses steady-rate ticker model (decoupled from pipeline callback rate) for video and wall-clock indices with monotonic enforcement for audio. Audio reader uses 5ms timeout to prevent SDK thread starvation. Discovery via NMOS IS-04 `flow_def.json` files. `--mxl-discover` lists available flows and exits. MXL sources prefixed with `mxl:` and excluded from Prism stream registration callbacks. Stub implementation (`!cgo || !mxl`) returns `ErrMXLNotAvailable` with monotonic clock `CurrentIndex` approximation.
+- **HTTP/3 control path:** All REST commands route over Prism's QUIC listener (`:8080`) via `ExtraRoutes`. CORS middleware (`control.CORSMiddleware`) wraps the API chain for cross-origin dev access. Middleware order: CORS → logger → metrics → auth → operator. Cert-hash endpoint registered outside auth chain (browsers need it pre-auth). TCP `:8081` is opt-in via `--http-fallback` for curl/scripts. Admin server (`:9090`) also serves cert-hash for Vite dev proxy bootstrapping.
+- **MoQ control track (event-driven):** State updates push via MoQ "control" track on per-source subscriptions. Browser's `media-pipeline.ts` routes control data to `ConnectionManager.handleControlData()` which dispatches to the state store and stops REST polling. Polling demoted to fallback (only active when WebTransport disconnects). `syncStatus` trusts `connectionState` when MoQ is active instead of heartbeat timer.
+- **mkcert support:** `--tls-cert` and `--tls-key` flags load externally-provided certificates (e.g., from mkcert). When a trusted cert is used, the cert-hash response includes `"trusted": true`, and browsers skip WebTransport cert pinning (no `serverCertificateHashes`). `make setup-mkcert` generates certs at `~/.switchframe/`. `make demo` auto-detects mkcert certs; falls back to `--http-fallback` with self-signed.
+- **Raw YUV program monitor:** `--raw-program-monitor` registers a `"program-raw"` MoQ track carrying raw YUV420. Wire format: `[uint32 BE width][uint32 BE height][Y plane W×H][Cb plane W/2×H/2][Cr plane W/2×H/2]`. Every frame is keyframe (no inter-frame deps). `--raw-monitor-scale` optionally downscales (720p/480p/360p) via `transition.ScaleYUV420`. Second `rawMonitorSink` on switcher tapped alongside MXL sink before H.264 encode. Browser's `yuv-renderer.ts` provides WebGL2/WebGL shader for BT.709 limited-range YUV→RGB conversion. Pipeline manager prefers `program-raw` over `program` when `isRawYUVSource` returns true. Bypasses H.264 encode+decode for ~4ms total latency vs ~15ms with codec round-trip.
+- **API base URL routing:** `ui/src/lib/api/base-url.ts` provides `resolveApiUrl(path)` prepending the QUIC server origin. Empty string in production (same-origin). Set from `fetchServerInfo()` in `onMount` when server reports `trusted: true` and origin differs from page. All `fetch()` calls in `switch-api.ts` and `transport-utils.ts` go through `resolveApiUrl`.
+- **Format presets API:** `GET /api/format` returns current pipeline format and available presets. `PUT /api/format` accepts preset name or custom `{width, height, fpsNum, fpsDen}`.
 
 ## Prism Dependency
 
