@@ -96,7 +96,17 @@ jobs:
       - name: Smoke test Docker image
         run: |
           docker run -d --name sf-smoke -p 9090:9090 switchframe:ci --demo
-          sleep 3
-          curl -f http://localhost:9090/health
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:9090/health > /dev/null 2>&1; then
+              echo "Health check passed after ${i}s"
+              break
+            fi
+            if [ "$i" -eq 30 ]; then
+              echo "Health check failed after 30s"
+              docker logs sf-smoke
+              exit 1
+            fi
+            sleep 1
+          done
           docker stop sf-smoke
           docker rm sf-smoke
