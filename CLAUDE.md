@@ -21,6 +21,7 @@ make test-all                              # run all tests
 ```
 server/                          # Go module (github.com/zsiec/switchframe/server)
   cmd/switchframe/main.go        # Binary entry point (standalone HTTP on :8080)
+    app.go                       #   Application init, system tuning checks, GC tuning
     embed_prod.go                #   Static file embedding (build tag: embed_ui)
     embed_dev.go                 #   No-op handler (default, dev mode)
     admin.go                     #   Admin/debug HTTP endpoints
@@ -168,6 +169,7 @@ ui/                              # SvelteKit frontend (Svelte 5 + TypeScript)
       audio/                     # Client-side audio
         pfl.ts                   #   PFL manager (per-source solo monitoring)
         pfl-toggle.ts            #   PFL toggle utility
+        peak-hold.ts             #   Peak hold computation for VU meters
       graphics/                  # Graphics overlay
         publisher.ts             #   Graphics publisher
         templates.ts             #   Graphics templates
@@ -175,6 +177,10 @@ ui/                              # SvelteKit frontend (Svelte 5 + TypeScript)
         manager.ts               #   Pipeline lifecycle manager
       util/                      # Utilities
         throttle.ts              #   Throttle function (used by T-bar)
+        color.ts                 #   Color conversion utilities (RGB ↔ YCbCr)
+        sort-sources.ts          #   Source sorting by position/key
+        tbar.ts                  #   T-bar position utility
+        timecode.ts              #   Timecode formatting (HH:MM:SS.mmm)
     components/                  # Svelte UI components
       Multiview.svelte           #   Source tile grid with tally outlines + canvas
       ProgramPreview.svelte      #   Large preview/program windows with canvas
@@ -205,6 +211,7 @@ ui/                              # SvelteKit frontend (Svelte 5 + TypeScript)
       OperatorRegistration.svelte #  Operator registration form (name, role)
       LockIndicator.svelte       #   Subsystem lock status indicator
       PresetPanel.svelte         #   Preset save/recall/delete panel
+      ServerPipelineOverlay.svelte #  Server pipeline visualization overlay
       BottomTabs.svelte          #   Tabbed bottom panel (Audio/Graphics/Macros/Keys/Replay/Presets)
       auto-animation.svelte.ts   #   Auto transition animation state
     lib/layout/                  # Layout mode management
@@ -223,10 +230,10 @@ Dockerfile                       # Multi-stage build (UI → Go → runtime)
 
 1. **This file** — layout and conventions
 
-## Current State (MVP + Production Hardening — Phases 1-21)
+## Current State (MVP + Production Hardening — Phases 1-22)
 
 - **Branch:** `main`
-- **Tests:** ~1100 Go tests + 575 Vitest tests + 45 E2E tests passing with `-race`
+- **Tests:** ~1336 Go tests + 590 Vitest tests + 47 E2E tests passing with `-race`
 - **What works:** Everything from Phases 1-5 + Simple Mode (volunteer-friendly layout), video/audio playback pipeline (MoQ → decoder → canvas), PFL audio decode + metering, FTB reverse toggle (smooth fade-in), recording file rotation (time + size), SRT wired to real zsiec/srtgo (pure Go), ring buffer overflow monitoring with reconnect callback, static file embedding (single binary), Dockerfile (multi-stage), GitHub Actions CI, Makefile with dev/build/docker/test targets, `make demo` with 4 simulated cameras (`--demo` flag)
 - **Phase 6 (Instrumentation):** Prometheus metrics, debug snapshot collector, event log, admin endpoints
 - **Phase 7 (Production Hardening):** Source delay buffer, GOP cache, auth middleware, brickwall limiter, async output adapter, codec stubs, DSK graphics compositor
@@ -244,6 +251,7 @@ Dockerfile                       # Multi-stage build (UI → Go → runtime)
 - **Phase 19 (Missing UI Panels):** PresetPanel (save/recall/delete, 6th BottomTab), source delay slider + badge, stinger upload/delete UI, confirm mode toggle, compressor bypass toggle, complete keyboard overlay, FTB button in simple mode, source health indicators in simple mode
 - **Phase 20 (Replay & Keying Polish):** Replay timecode display (HH:MM:SS.mmm mark-in/out + clip duration), HiDPI canvas for replay monitor, ReplayPanel design system migration (hex → CSS variables), key color picker (green/blue presets + RGB picker with BT.709 YCbCr conversion), load key config on source select
 - **Phase 21 (Broadcast Quality & Feature Completeness):** Video processing channel depth fix (2→4), H.264 colorspace signaling (BT.709), limited-range black level default (Y=16), per-channel biquad EQ state (stereo crosstalk fix), chroma key squared distance + configurable spill replacement color, Lanczos-3 scaler with auto-selection, replay frame blending + interpolator interface, per-source audio delay buffer (lip-sync correction 0-500ms), BS.1770-4 LUFS loudness metering (K-weighted filtering, momentary/short-term/integrated with dual gating), replay audio with WSOLA time-stretching (pitch-preserved slow-motion), multi-destination SRT output (add/remove/start/stop per-destination lifecycle)
+- **Phase 22 (Performance Hardening):** Buffer-reuse APIs for NALU conversion (`AVC1ToAnnexBInto`, `PrependSPSPPSInto`), crossfade lookup table + `Into` variants, per-source frame sync locks, `statsMu` removal (atomic `lastGroupID`), sync.Pool for AVC1/GOP buffers, deep-copy YUV before async enqueue (race fix), `putGOPBuf` dangling pointer fix, GOP cache single-lock acquisition, frame deadline monitoring, `videoProcCh` buffer 4→8, cache line padding on source viewer atomics, lock-free delay buffer callbacks, wipe/stinger direct chroma alpha + SIMD `blendAlpha` for chroma planes, mixer hot-path allocation elimination (crossfade/MXL sink buffers), mix accumulation loop BCE optimization, `GOGC=400` default, system tuning check (`RLIMIT_NOFILE`), TSMuxer buffer reuse
 - **MXL Integration:** Shared-memory media transport for uncompressed V210 video + float32 audio. `mxl/` package with cgo bindings (build tag: `mxl`), flow discovery (NMOS IS-04), V210↔YUV420p conversion, Reader/Writer/Source/Output orchestrators. Triple fan-out: raw YUV to switcher, raw PCM to mixer, H.264/AAC encoded to browser relay. Program output routed back to MXL via sink callbacks. `make mxl-demo` runs GStreamer test sources + Switchframe + UI. Stub implementation for non-MXL builds.
 - **What's stubbed:** ISO per-source recording (v2.5), WebGPU dissolve (Canvas 2D fallback works)
 
@@ -302,6 +310,21 @@ Dockerfile                       # Multi-stage build (UI → Go → runtime)
 - **WSOLA time-stretching:** Waveform Similarity Overlap-Add for pitch-preserved audio slow-motion. Hann window overlap-add with normalized cross-correlation search. Window size 1024 samples, search range 256. Passthrough at 1.0x speed.
 - **Lanczos-3 scaler:** Broadcast-quality Lanczos-3 kernel scaler with sinc-based interpolation. Auto-selected for quality scaling (transitions, replay), bilinear used for speed-critical paths. `ScaleYUV420WithQuality(quality)` factory function.
 - **Multi-destination SRT:** Per-destination `OutputDestination` with independent lifecycle (add/remove/start/stop). Each destination gets its own `AsyncAdapter` wrapper. CRUD API at `/api/output/destinations`. Destinations included in adapter fan-out via `rebuildAdaptersLocked()`. State change callbacks trigger ControlRoomState broadcast.
+- **Buffer-reuse NALU APIs:** `AVC1ToAnnexBInto(avc1, dst)` and `PrependSPSPPSInto(sps, pps, data, dst)` write into caller-provided buffers for zero-allocation steady-state. TSMuxer, GOP cache, and confidence monitor use persistent buffers. Original functions delegate to `Into` variants with `nil`.
+- **Crossfade lookup table:** 1024-entry precomputed cos/sin tables replace per-sample `math.Cos`/`math.Sin`. `EqualPowerCrossfadeStereoInto(dst, old, new, channels)` accepts a reusable buffer. Mixer stores `crossfadeBuf` field.
+- **Per-source frame sync locks:** `syncSource` has its own `sync.Mutex`. Ingest acquires global `fs.mu` briefly for source lookup, then per-source `ss.mu` for ring buffer ops. Tick release acquires each source lock individually.
+- **Lock-free source stats:** `sourceState.statsMu` eliminated. Frame stats are single-writer (source viewer goroutine). `lastGroupID` changed to `atomic.Uint32` for lock-free reads.
+- **GOP buffer pool fix:** `gopBufPool` stores `[]byte` values directly instead of `*[]byte` pointers. The old pattern pooled pointers to stack locals (useless/UB). Single lock acquisition in `RecordFrame` eliminates double-lock per frame.
+- **AVC1 buffer pool:** `sync.Pool` in `pipeline_codecs.go` recycles 50-150KB AVC1 output buffers. `putAVC1Buffer` called after program relay broadcast.
+- **Transition YUV deep-copy:** `broadcastProcessed()` deep-copies YUV buffer before async enqueue to prevent race with `FrameBlender` reuse.
+- **Frame deadline monitoring:** `frameBudgetNs` (default 33ms) and `deadlineViolations` atomic counter. Exposed in `DebugSnapshot()`.
+- **Video processing buffer:** `videoProcCh` increased from 4 to 8 frames (267ms at 30fps).
+- **Cache line padding:** `sourceViewer` adds `[56]byte` padding between `videoSent`, `audioSent`, `captionSent` atomics to prevent false sharing.
+- **Lock-free delay buffer:** `sourceDelay.generation` is `atomic.Uint64`, `stopped` is `atomic.Bool`. Timer callbacks check generation/stopped atomically without mutex.
+- **Wipe/stinger chroma SIMD:** Wipe transitions compute chroma alpha directly at half resolution (no downsample pass). Stinger uses `downsampleAlphaToChroma()` + SIMD `blendAlpha` kernel for Cb/Cr planes.
+- **Mix accumulation BCE:** Inner loop pre-slices `accum` and `src` with single `range` bound, enabling compiler bounds-check elimination and potential auto-vectorization.
+- **GC tuning:** `debug.SetGCPercent(400)` in `init()` if `GOGC` env not set. Reduces GC frequency for real-time frame processing.
+- **System tuning check:** `logSystemTuning()` checks `RLIMIT_NOFILE` at startup, warns if below 65536.
 - **MXL integration:** Shared-memory media transport via `server/mxl/` package. Build tags: `cgo && mxl`. Uses `pkg-config: libmxl` with `MXL_ROOT` pointing to SDK install. `FlowOpener` interface abstracts cgo/stub implementations. Sources bypass Prism relay path — `RegisterMXLSource()` creates `sourceState` with nil relay, frames arrive via `IngestRawVideo()` (raw YUV420p) and `IngestPCM()` (float32). Triple fan-out per source: (1) raw YUV to switcher pipeline, (2) raw PCM to audio mixer (skips AAC decode), (3) H.264/AAC encoded to per-source browser relay. V210↔YUV420p conversion handles 10-bit 4:2:2 to 8-bit 4:2:0 with chroma downsampling. Writer uses steady-rate ticker model (decoupled from pipeline callback rate) for video and wall-clock indices with monotonic enforcement for audio. Audio reader uses 5ms timeout to prevent SDK thread starvation. Discovery via NMOS IS-04 `flow_def.json` files. `--mxl-discover` lists available flows and exits. MXL sources prefixed with `mxl:` and excluded from Prism stream registration callbacks. Stub implementation (`!cgo || !mxl`) returns `ErrMXLNotAvailable` with monotonic clock `CurrentIndex` approximation.
 
 ## Prism Dependency
