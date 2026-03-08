@@ -229,6 +229,7 @@ Dockerfile                       # Multi-stage build (UI → Go → runtime)
 ## Reading Order for New Agents
 
 1. **This file** — layout and conventions
+2. **[docs/locking-and-concurrency.md](docs/locking-and-concurrency.md)** — lock inventory, frame flow diagrams, lock ordering rules, deadlock-free guarantees
 
 ## Current State (MVP + Production Hardening — Phases 1-22)
 
