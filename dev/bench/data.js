@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1772994762286,
+  "lastUpdate": 1772997153544,
   "repoUrl": "https://github.com/zsiec/switchframe",
   "entries": {
     "Benchmark": [
@@ -41026,6 +41026,2544 @@ window.BENCHMARK_DATA = {
           {
             "name": "BenchmarkScaleLanczos_720to1080 - B/op",
             "value": 251576,
+            "unit": "B/op",
+            "extra": "33 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkScaleLanczos_720to1080 - allocs/op",
+            "value": 3,
+            "unit": "allocs/op",
+            "extra": "33 times\n4 procs"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "thomas.symborski@gmail.com",
+            "name": "Thomas Symborski",
+            "username": "zsiec"
+          },
+          "committer": {
+            "email": "thomas.symborski@gmail.com",
+            "name": "Thomas Symborski",
+            "username": "zsiec"
+          },
+          "distinct": true,
+          "id": "9f24b31a68ff9a294bb1367dc0c2ddacd109b6b4",
+          "message": "Preserve source PTS; enforce monotonic video PTS\n\nKeep video PTS on the source timeline while guaranteeing monotonic output and improving FRC/tick handling. Key changes:\n\n- Audio mixer: advanceOutputPTS now follows input PTS (keeps A/V sync), only forcing a monotonic step when input goes backward and reseeding on large jumps; removed lastSeenMixPTS.\n- Frame synchronizer: fresh source frames preserve their original PTS; repeated/frozen frames advance by one tick interval to remain monotonic. Added per-source lastReleasedPTS + ptsInitialized to track released PTS. Audio frames now bypass frame sync (continuous sample stream) to avoid dropping frames.\n- FRC: frcSource now tracks ticksSinceLastFresh and receives tickIntervalPTS (90kHz PTS ticks per pipeline tick). Interpolated frames compute PTS relative to lastReleasedPTS + ticks*tickIntervalPTS.\n- Tests: updated mixer/frc/frame_sync tests to reflect source-following PTS semantics and new FRC constructor signature.\n- Source viewer: SendAudio routes audio through delay buffer only; it no longer passes audio through FrameSynchronizer.\n- UI: When creating a WebGL-based YUV renderer, swap out a canvas that already has a 2D context by replacing it with a fresh canvas element to avoid context conflicts.\n\nThese changes preserve A/V synchronization, make PTS behavior predictable across source switches and freezes, and ensure interpolated/repeated frames are monotonic for downstream decoders.",
+          "timestamp": "2026-03-08T15:09:32-04:00",
+          "tree_id": "06b3c88c6daf7aa223e6b22f4e4da398cc53dcf2",
+          "url": "https://github.com/zsiec/switchframe/commit/9f24b31a68ff9a294bb1367dc0c2ddacd109b6b4"
+        },
+        "date": 1772997152891,
+        "tool": "go",
+        "benches": [
+          {
+            "name": "BenchmarkBiquadAfterSilence",
+            "value": 7072,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "157711 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkBiquadAfterSilence - ns/op",
+            "value": 7072,
+            "unit": "ns/op",
+            "extra": "157711 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkBiquadAfterSilence - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "157711 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkBiquadAfterSilence - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "157711 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDBToLinear",
+            "value": 58.8,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "20336017 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDBToLinear - ns/op",
+            "value": 58.8,
+            "unit": "ns/op",
+            "extra": "20336017 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDBToLinear - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "20336017 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDBToLinear - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "20336017 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkLinearToDBFS",
+            "value": 12.73,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "94927155 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkLinearToDBFS - ns/op",
+            "value": 12.73,
+            "unit": "ns/op",
+            "extra": "94927155 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkLinearToDBFS - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "94927155 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkLinearToDBFS - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "94927155 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkPeakLevel_1024Samples",
+            "value": 1928,
+            "unit": "ns/op\t4250.00 MB/s\t       0 B/op\t       0 allocs/op",
+            "extra": "620838 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkPeakLevel_1024Samples - ns/op",
+            "value": 1928,
+            "unit": "ns/op",
+            "extra": "620838 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkPeakLevel_1024Samples - MB/s",
+            "value": 4250,
+            "unit": "MB/s",
+            "extra": "620838 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkPeakLevel_1024Samples - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "620838 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkPeakLevel_1024Samples - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "620838 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEqualPowerCrossfade_1024Samples",
+            "value": 6253,
+            "unit": "ns/op\t1310.12 MB/s\t    8199 B/op\t       1 allocs/op",
+            "extra": "184278 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEqualPowerCrossfade_1024Samples - ns/op",
+            "value": 6253,
+            "unit": "ns/op",
+            "extra": "184278 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEqualPowerCrossfade_1024Samples - MB/s",
+            "value": 1310.12,
+            "unit": "MB/s",
+            "extra": "184278 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEqualPowerCrossfade_1024Samples - B/op",
+            "value": 8199,
+            "unit": "B/op",
+            "extra": "184278 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEqualPowerCrossfade_1024Samples - allocs/op",
+            "value": 1,
+            "unit": "allocs/op",
+            "extra": "184278 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkAddFloat32_2048",
+            "value": 168.2,
+            "unit": "ns/op\t48699.80 MB/s\t       0 B/op\t       0 allocs/op",
+            "extra": "7120630 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkAddFloat32_2048 - ns/op",
+            "value": 168.2,
+            "unit": "ns/op",
+            "extra": "7120630 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkAddFloat32_2048 - MB/s",
+            "value": 48699.8,
+            "unit": "MB/s",
+            "extra": "7120630 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkAddFloat32_2048 - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "7120630 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkAddFloat32_2048 - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "7120630 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkScaleFloat32_2048",
+            "value": 127.2,
+            "unit": "ns/op\t64382.98 MB/s\t       0 B/op\t       0 allocs/op",
+            "extra": "9400460 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkScaleFloat32_2048 - ns/op",
+            "value": 127.2,
+            "unit": "ns/op",
+            "extra": "9400460 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkScaleFloat32_2048 - MB/s",
+            "value": 64382.98,
+            "unit": "MB/s",
+            "extra": "9400460 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkScaleFloat32_2048 - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "9400460 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkScaleFloat32_2048 - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "9400460 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMulAddFloat32_2048",
+            "value": 434,
+            "unit": "ns/op\t18874.10 MB/s\t       0 B/op\t       0 allocs/op",
+            "extra": "2743483 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMulAddFloat32_2048 - ns/op",
+            "value": 434,
+            "unit": "ns/op",
+            "extra": "2743483 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMulAddFloat32_2048 - MB/s",
+            "value": 18874.1,
+            "unit": "MB/s",
+            "extra": "2743483 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMulAddFloat32_2048 - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "2743483 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMulAddFloat32_2048 - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "2743483 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEncoderOutput",
+            "value": 110370,
+            "unit": "ns/op\t      42 B/op\t       3 allocs/op",
+            "extra": "10000 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEncoderOutput - ns/op",
+            "value": 110370,
+            "unit": "ns/op",
+            "extra": "10000 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEncoderOutput - B/op",
+            "value": 42,
+            "unit": "B/op",
+            "extra": "10000 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEncoderOutput - allocs/op",
+            "value": 3,
+            "unit": "allocs/op",
+            "extra": "10000 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkAVC1ToAnnexB",
+            "value": 6852,
+            "unit": "ns/op\t7480.40 MB/s\t   57344 B/op\t       1 allocs/op",
+            "extra": "155983 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkAVC1ToAnnexB - ns/op",
+            "value": 6852,
+            "unit": "ns/op",
+            "extra": "155983 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkAVC1ToAnnexB - MB/s",
+            "value": 7480.4,
+            "unit": "MB/s",
+            "extra": "155983 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkAVC1ToAnnexB - B/op",
+            "value": 57344,
+            "unit": "B/op",
+            "extra": "155983 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkAVC1ToAnnexB - allocs/op",
+            "value": 1,
+            "unit": "allocs/op",
+            "extra": "155983 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkAnnexBToAVC1",
+            "value": 57131,
+            "unit": "ns/op\t 897.09 MB/s\t   57512 B/op\t       4 allocs/op",
+            "extra": "20988 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkAnnexBToAVC1 - ns/op",
+            "value": 57131,
+            "unit": "ns/op",
+            "extra": "20988 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkAnnexBToAVC1 - MB/s",
+            "value": 897.09,
+            "unit": "MB/s",
+            "extra": "20988 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkAnnexBToAVC1 - B/op",
+            "value": 57512,
+            "unit": "B/op",
+            "extra": "20988 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkAnnexBToAVC1 - allocs/op",
+            "value": 4,
+            "unit": "allocs/op",
+            "extra": "20988 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkAnnexBToAVC1Into",
+            "value": 50621,
+            "unit": "ns/op\t1012.46 MB/s\t     168 B/op\t       3 allocs/op",
+            "extra": "23761 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkAnnexBToAVC1Into - ns/op",
+            "value": 50621,
+            "unit": "ns/op",
+            "extra": "23761 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkAnnexBToAVC1Into - MB/s",
+            "value": 1012.46,
+            "unit": "MB/s",
+            "extra": "23761 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkAnnexBToAVC1Into - B/op",
+            "value": 168,
+            "unit": "B/op",
+            "extra": "23761 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkAnnexBToAVC1Into - allocs/op",
+            "value": 3,
+            "unit": "allocs/op",
+            "extra": "23761 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkExtractNALUs",
+            "value": 125.9,
+            "unit": "ns/op\t407129.95 MB/s\t     168 B/op\t       3 allocs/op",
+            "extra": "9352142 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkExtractNALUs - ns/op",
+            "value": 125.9,
+            "unit": "ns/op",
+            "extra": "9352142 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkExtractNALUs - MB/s",
+            "value": 407129.95,
+            "unit": "MB/s",
+            "extra": "9352142 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkExtractNALUs - B/op",
+            "value": 168,
+            "unit": "B/op",
+            "extra": "9352142 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkExtractNALUs - allocs/op",
+            "value": 3,
+            "unit": "allocs/op",
+            "extra": "9352142 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkAVC1ToAnnexB_SmallPFrame",
+            "value": 355.9,
+            "unit": "ns/op\t5765.41 MB/s\t    2304 B/op\t       1 allocs/op",
+            "extra": "3459848 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkAVC1ToAnnexB_SmallPFrame - ns/op",
+            "value": 355.9,
+            "unit": "ns/op",
+            "extra": "3459848 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkAVC1ToAnnexB_SmallPFrame - MB/s",
+            "value": 5765.41,
+            "unit": "MB/s",
+            "extra": "3459848 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkAVC1ToAnnexB_SmallPFrame - B/op",
+            "value": 2304,
+            "unit": "B/op",
+            "extra": "3459848 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkAVC1ToAnnexB_SmallPFrame - allocs/op",
+            "value": 1,
+            "unit": "allocs/op",
+            "extra": "3459848 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkStateMarshal_8Sources",
+            "value": 16883,
+            "unit": "ns/op\t    8065 B/op\t      53 allocs/op",
+            "extra": "71395 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkStateMarshal_8Sources - ns/op",
+            "value": 16883,
+            "unit": "ns/op",
+            "extra": "71395 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkStateMarshal_8Sources - B/op",
+            "value": 8065,
+            "unit": "B/op",
+            "extra": "71395 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkStateMarshal_8Sources - allocs/op",
+            "value": 53,
+            "unit": "allocs/op",
+            "extra": "71395 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkStateUnmarshal_8Sources",
+            "value": 73331,
+            "unit": "ns/op\t  55.07 MB/s\t    5392 B/op\t     129 allocs/op",
+            "extra": "16962 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkStateUnmarshal_8Sources - ns/op",
+            "value": 73331,
+            "unit": "ns/op",
+            "extra": "16962 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkStateUnmarshal_8Sources - MB/s",
+            "value": 55.07,
+            "unit": "MB/s",
+            "extra": "16962 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkStateUnmarshal_8Sources - B/op",
+            "value": 5392,
+            "unit": "B/op",
+            "extra": "16962 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkStateUnmarshal_8Sources - allocs/op",
+            "value": 129,
+            "unit": "allocs/op",
+            "extra": "16962 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkStateMarshal_4Sources",
+            "value": 9850,
+            "unit": "ns/op\t    4833 B/op\t      29 allocs/op",
+            "extra": "120189 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkStateMarshal_4Sources - ns/op",
+            "value": 9850,
+            "unit": "ns/op",
+            "extra": "120189 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkStateMarshal_4Sources - B/op",
+            "value": 4833,
+            "unit": "B/op",
+            "extra": "120189 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkStateMarshal_4Sources - allocs/op",
+            "value": 29,
+            "unit": "allocs/op",
+            "extra": "120189 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkStatePublish",
+            "value": 16870,
+            "unit": "ns/op\t    8065 B/op\t      53 allocs/op",
+            "extra": "70584 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkStatePublish - ns/op",
+            "value": 16870,
+            "unit": "ns/op",
+            "extra": "70584 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkStatePublish - B/op",
+            "value": 8065,
+            "unit": "B/op",
+            "extra": "70584 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkStatePublish - allocs/op",
+            "value": 53,
+            "unit": "allocs/op",
+            "extra": "70584 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkChannelPublish",
+            "value": 20754,
+            "unit": "ns/op\t    8067 B/op\t      53 allocs/op",
+            "extra": "58468 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkChannelPublish - ns/op",
+            "value": 20754,
+            "unit": "ns/op",
+            "extra": "58468 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkChannelPublish - B/op",
+            "value": 8067,
+            "unit": "B/op",
+            "extra": "58468 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkChannelPublish - allocs/op",
+            "value": 53,
+            "unit": "allocs/op",
+            "extra": "58468 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkAlphaBlendRGBARowY_1920_FullOpaque",
+            "value": 4838,
+            "unit": "ns/op\t 396.85 MB/s\t       0 B/op\t       0 allocs/op",
+            "extra": "242122 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkAlphaBlendRGBARowY_1920_FullOpaque - ns/op",
+            "value": 4838,
+            "unit": "ns/op",
+            "extra": "242122 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkAlphaBlendRGBARowY_1920_FullOpaque - MB/s",
+            "value": 396.85,
+            "unit": "MB/s",
+            "extra": "242122 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkAlphaBlendRGBARowY_1920_FullOpaque - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "242122 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkAlphaBlendRGBARowY_1920_FullOpaque - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "242122 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkAlphaBlendRGBARowY_1920_Sparse",
+            "value": 1756,
+            "unit": "ns/op\t1093.08 MB/s\t       0 B/op\t       0 allocs/op",
+            "extra": "681819 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkAlphaBlendRGBARowY_1920_Sparse - ns/op",
+            "value": 1756,
+            "unit": "ns/op",
+            "extra": "681819 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkAlphaBlendRGBARowY_1920_Sparse - MB/s",
+            "value": 1093.08,
+            "unit": "MB/s",
+            "extra": "681819 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkAlphaBlendRGBARowY_1920_Sparse - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "681819 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkAlphaBlendRGBARowY_1920_Sparse - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "681819 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkAlphaBlendRGBA_Full",
+            "value": 3347815,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "357 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkAlphaBlendRGBA_Full - ns/op",
+            "value": 3347815,
+            "unit": "ns/op",
+            "extra": "357 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkAlphaBlendRGBA_Full - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "357 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkAlphaBlendRGBA_Full - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "357 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkAlphaBlendRGBA_TypicalLowerThird",
+            "value": 3372383,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "357 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkAlphaBlendRGBA_TypicalLowerThird - ns/op",
+            "value": 3372383,
+            "unit": "ns/op",
+            "extra": "357 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkAlphaBlendRGBA_TypicalLowerThird - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "357 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkAlphaBlendRGBA_TypicalLowerThird - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "357 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkChromaKeyMaskChroma_1080p",
+            "value": 632765,
+            "unit": "ns/op\t 819.26 MB/s\t       0 B/op\t       0 allocs/op",
+            "extra": "1892 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkChromaKeyMaskChroma_1080p - ns/op",
+            "value": 632765,
+            "unit": "ns/op",
+            "extra": "1892 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkChromaKeyMaskChroma_1080p - MB/s",
+            "value": 819.26,
+            "unit": "MB/s",
+            "extra": "1892 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkChromaKeyMaskChroma_1080p - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "1892 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkChromaKeyMaskChroma_1080p - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "1892 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkChromaKeyOld_1080p",
+            "value": 3516469,
+            "unit": "ns/op\t 589.68 MB/s\t 2605079 B/op\t       2 allocs/op",
+            "extra": "308 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkChromaKeyOld_1080p - ns/op",
+            "value": 3516469,
+            "unit": "ns/op",
+            "extra": "308 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkChromaKeyOld_1080p - MB/s",
+            "value": 589.68,
+            "unit": "MB/s",
+            "extra": "308 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkChromaKeyOld_1080p - B/op",
+            "value": 2605079,
+            "unit": "B/op",
+            "extra": "308 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkChromaKeyOld_1080p - allocs/op",
+            "value": 2,
+            "unit": "allocs/op",
+            "extra": "308 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkChromaKeyNew_1080p",
+            "value": 3236042,
+            "unit": "ns/op\t 640.78 MB/s\t       0 B/op\t       0 allocs/op",
+            "extra": "369 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkChromaKeyNew_1080p - ns/op",
+            "value": 3236042,
+            "unit": "ns/op",
+            "extra": "369 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkChromaKeyNew_1080p - MB/s",
+            "value": 640.78,
+            "unit": "MB/s",
+            "extra": "369 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkChromaKeyNew_1080p - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "369 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkChromaKeyNew_1080p - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "369 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkLumaKeyMaskLUT_1080p",
+            "value": 771919,
+            "unit": "ns/op\t2686.29 MB/s\t       0 B/op\t       0 allocs/op",
+            "extra": "1555 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkLumaKeyMaskLUT_1080p - ns/op",
+            "value": 771919,
+            "unit": "ns/op",
+            "extra": "1555 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkLumaKeyMaskLUT_1080p - MB/s",
+            "value": 2686.29,
+            "unit": "MB/s",
+            "extra": "1555 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkLumaKeyMaskLUT_1080p - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "1555 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkLumaKeyMaskLUT_1080p - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "1555 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkLumaKey_1080p",
+            "value": 2179444,
+            "unit": "ns/op\t 951.44 MB/s\t 2080775 B/op\t       1 allocs/op",
+            "extra": "518 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkLumaKey_1080p - ns/op",
+            "value": 2179444,
+            "unit": "ns/op",
+            "extra": "518 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkLumaKey_1080p - MB/s",
+            "value": 951.44,
+            "unit": "MB/s",
+            "extra": "518 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkLumaKey_1080p - B/op",
+            "value": 2080775,
+            "unit": "B/op",
+            "extra": "518 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkLumaKey_1080p - allocs/op",
+            "value": 1,
+            "unit": "allocs/op",
+            "extra": "518 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkV210ToYUV420p_1080p",
+            "value": 3078875,
+            "unit": "ns/op\t1795.98 MB/s\t 3117061 B/op\t       3 allocs/op",
+            "extra": "387 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkV210ToYUV420p_1080p - ns/op",
+            "value": 3078875,
+            "unit": "ns/op",
+            "extra": "387 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkV210ToYUV420p_1080p - MB/s",
+            "value": 1795.98,
+            "unit": "MB/s",
+            "extra": "387 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkV210ToYUV420p_1080p - B/op",
+            "value": 3117061,
+            "unit": "B/op",
+            "extra": "387 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkV210ToYUV420p_1080p - allocs/op",
+            "value": 3,
+            "unit": "allocs/op",
+            "extra": "387 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkV210ToYUV420pInto_1080p",
+            "value": 2896529,
+            "unit": "ns/op\t1909.04 MB/s\t       0 B/op\t       0 allocs/op",
+            "extra": "416 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkV210ToYUV420pInto_1080p - ns/op",
+            "value": 2896529,
+            "unit": "ns/op",
+            "extra": "416 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkV210ToYUV420pInto_1080p - MB/s",
+            "value": 1909.04,
+            "unit": "MB/s",
+            "extra": "416 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkV210ToYUV420pInto_1080p - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "416 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkV210ToYUV420pInto_1080p - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "416 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkYUV420pToV210_1080p",
+            "value": 1134412,
+            "unit": "ns/op\t2741.86 MB/s\t 5529608 B/op\t       1 allocs/op",
+            "extra": "1090 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkYUV420pToV210_1080p - ns/op",
+            "value": 1134412,
+            "unit": "ns/op",
+            "extra": "1090 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkYUV420pToV210_1080p - MB/s",
+            "value": 2741.86,
+            "unit": "MB/s",
+            "extra": "1090 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkYUV420pToV210_1080p - B/op",
+            "value": 5529608,
+            "unit": "B/op",
+            "extra": "1090 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkYUV420pToV210_1080p - allocs/op",
+            "value": 1,
+            "unit": "allocs/op",
+            "extra": "1090 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkYUV420pToV210Into_1080p",
+            "value": 841654,
+            "unit": "ns/op\t3695.58 MB/s\t       0 B/op\t       0 allocs/op",
+            "extra": "1422 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkYUV420pToV210Into_1080p - ns/op",
+            "value": 841654,
+            "unit": "ns/op",
+            "extra": "1422 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkYUV420pToV210Into_1080p - MB/s",
+            "value": 3695.58,
+            "unit": "MB/s",
+            "extra": "1422 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkYUV420pToV210Into_1080p - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "1422 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkYUV420pToV210Into_1080p - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "1422 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkV210RoundTrip_1080p",
+            "value": 4568260,
+            "unit": "ns/op\t 680.87 MB/s\t 8646672 B/op\t       4 allocs/op",
+            "extra": "265 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkV210RoundTrip_1080p - ns/op",
+            "value": 4568260,
+            "unit": "ns/op",
+            "extra": "265 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkV210RoundTrip_1080p - MB/s",
+            "value": 680.87,
+            "unit": "MB/s",
+            "extra": "265 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkV210RoundTrip_1080p - B/op",
+            "value": 8646672,
+            "unit": "B/op",
+            "extra": "265 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkV210RoundTrip_1080p - allocs/op",
+            "value": 4,
+            "unit": "allocs/op",
+            "extra": "265 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkV210RoundTripInto_1080p",
+            "value": 3725391,
+            "unit": "ns/op\t 834.92 MB/s\t       0 B/op\t       0 allocs/op",
+            "extra": "321 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkV210RoundTripInto_1080p - ns/op",
+            "value": 3725391,
+            "unit": "ns/op",
+            "extra": "321 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkV210RoundTripInto_1080p - MB/s",
+            "value": 834.92,
+            "unit": "MB/s",
+            "extra": "321 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkV210RoundTripInto_1080p - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "321 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkV210RoundTripInto_1080p - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "321 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMXLWriterVideoHotPath",
+            "value": 59.61,
+            "unit": "ns/op\t      24 B/op\t       1 allocs/op",
+            "extra": "19721188 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMXLWriterVideoHotPath - ns/op",
+            "value": 59.61,
+            "unit": "ns/op",
+            "extra": "19721188 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMXLWriterVideoHotPath - B/op",
+            "value": 24,
+            "unit": "B/op",
+            "extra": "19721188 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMXLWriterVideoHotPath - allocs/op",
+            "value": 1,
+            "unit": "allocs/op",
+            "extra": "19721188 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMXLWriterAudioHotPath",
+            "value": 3402,
+            "unit": "ns/op\t    8427 B/op\t       3 allocs/op",
+            "extra": "298156 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMXLWriterAudioHotPath - ns/op",
+            "value": 3402,
+            "unit": "ns/op",
+            "extra": "298156 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMXLWriterAudioHotPath - B/op",
+            "value": 8427,
+            "unit": "B/op",
+            "extra": "298156 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMXLWriterAudioHotPath - allocs/op",
+            "value": 3,
+            "unit": "allocs/op",
+            "extra": "298156 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkChromaVAvg_1080p",
+            "value": 20.82,
+            "unit": "ns/op\t46115.77 MB/s\t       0 B/op\t       0 allocs/op",
+            "extra": "56941525 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkChromaVAvg_1080p - ns/op",
+            "value": 20.82,
+            "unit": "ns/op",
+            "extra": "56941525 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkChromaVAvg_1080p - MB/s",
+            "value": 46115.77,
+            "unit": "MB/s",
+            "extra": "56941525 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkChromaVAvg_1080p - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "56941525 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkChromaVAvg_1080p - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "56941525 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkV210UnpackRow_1080p",
+            "value": 2625,
+            "unit": "ns/op\t1950.80 MB/s\t       0 B/op\t       0 allocs/op",
+            "extra": "456261 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkV210UnpackRow_1080p - ns/op",
+            "value": 2625,
+            "unit": "ns/op",
+            "extra": "456261 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkV210UnpackRow_1080p - MB/s",
+            "value": 1950.8,
+            "unit": "MB/s",
+            "extra": "456261 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkV210UnpackRow_1080p - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "456261 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkV210UnpackRow_1080p - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "456261 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkV210PackRow_1080p",
+            "value": 798.9,
+            "unit": "ns/op\t6409.13 MB/s\t       0 B/op\t       0 allocs/op",
+            "extra": "1489863 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkV210PackRow_1080p - ns/op",
+            "value": 798.9,
+            "unit": "ns/op",
+            "extra": "1489863 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkV210PackRow_1080p - MB/s",
+            "value": 6409.13,
+            "unit": "MB/s",
+            "extra": "1489863 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkV210PackRow_1080p - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "1489863 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkV210PackRow_1080p - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "1489863 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMuxerFlush",
+            "value": 2677,
+            "unit": "ns/op\t     329 B/op\t       6 allocs/op",
+            "extra": "414814 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMuxerFlush - ns/op",
+            "value": 2677,
+            "unit": "ns/op",
+            "extra": "414814 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMuxerFlush - B/op",
+            "value": 329,
+            "unit": "B/op",
+            "extra": "414814 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMuxerFlush - allocs/op",
+            "value": 6,
+            "unit": "allocs/op",
+            "extra": "414814 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkReplayBuffer_RecordFrame",
+            "value": 1199,
+            "unit": "ns/op\t   10806 B/op\t       1 allocs/op",
+            "extra": "941284 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkReplayBuffer_RecordFrame - ns/op",
+            "value": 1199,
+            "unit": "ns/op",
+            "extra": "941284 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkReplayBuffer_RecordFrame - B/op",
+            "value": 10806,
+            "unit": "B/op",
+            "extra": "941284 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkReplayBuffer_RecordFrame - allocs/op",
+            "value": 1,
+            "unit": "allocs/op",
+            "extra": "941284 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkReplayBuffer_ExtractClip",
+            "value": 231813,
+            "unit": "ns/op\t 1707611 B/op\t     333 allocs/op",
+            "extra": "5186 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkReplayBuffer_ExtractClip - ns/op",
+            "value": 231813,
+            "unit": "ns/op",
+            "extra": "5186 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkReplayBuffer_ExtractClip - B/op",
+            "value": 1707611,
+            "unit": "B/op",
+            "extra": "5186 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkReplayBuffer_ExtractClip - allocs/op",
+            "value": 333,
+            "unit": "allocs/op",
+            "extra": "5186 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkReplayViewer_SendVideo",
+            "value": 827.9,
+            "unit": "ns/op\t    6013 B/op\t       1 allocs/op",
+            "extra": "1306502 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkReplayViewer_SendVideo - ns/op",
+            "value": 827.9,
+            "unit": "ns/op",
+            "extra": "1306502 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkReplayViewer_SendVideo - B/op",
+            "value": 6013,
+            "unit": "B/op",
+            "extra": "1306502 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkReplayViewer_SendVideo - allocs/op",
+            "value": 1,
+            "unit": "allocs/op",
+            "extra": "1306502 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDelayBufferZeroDelay",
+            "value": 274.9,
+            "unit": "ns/op\t     276 B/op\t       0 allocs/op",
+            "extra": "3737593 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDelayBufferZeroDelay - ns/op",
+            "value": 274.9,
+            "unit": "ns/op",
+            "extra": "3737593 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDelayBufferZeroDelay - B/op",
+            "value": 276,
+            "unit": "B/op",
+            "extra": "3737593 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDelayBufferZeroDelay - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "3737593 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkFormatFPS",
+            "value": 0.6427,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "1000000000 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkFormatFPS - ns/op",
+            "value": 0.6427,
+            "unit": "ns/op",
+            "extra": "1000000000 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkFormatFPS - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "1000000000 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkFormatFPS - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "1000000000 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkFormatFrameDuration",
+            "value": 0.3178,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "1000000000 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkFormatFrameDuration - ns/op",
+            "value": 0.3178,
+            "unit": "ns/op",
+            "extra": "1000000000 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkFormatFrameDuration - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "1000000000 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkFormatFrameDuration - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "1000000000 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkReleaseTick",
+            "value": 1851,
+            "unit": "ns/op\t    4597 B/op\t       0 allocs/op",
+            "extra": "777438 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkReleaseTick - ns/op",
+            "value": 1851,
+            "unit": "ns/op",
+            "extra": "777438 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkReleaseTick - B/op",
+            "value": 4597,
+            "unit": "B/op",
+            "extra": "777438 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkReleaseTick - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "777438 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkFrameSyncIngest",
+            "value": 30.47,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "36142658 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkFrameSyncIngest - ns/op",
+            "value": 30.47,
+            "unit": "ns/op",
+            "extra": "36142658 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkFrameSyncIngest - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "36142658 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkFrameSyncIngest - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "36142658 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDiamondSearch_1080p",
+            "value": 4264479,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "283 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDiamondSearch_1080p - ns/op",
+            "value": 4264479,
+            "unit": "ns/op",
+            "extra": "283 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDiamondSearch_1080p - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "283 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDiamondSearch_1080p - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "283 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDiamondSearch_SingleBlock",
+            "value": 782.8,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "1532751 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDiamondSearch_SingleBlock - ns/op",
+            "value": 782.8,
+            "unit": "ns/op",
+            "extra": "1532751 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDiamondSearch_SingleBlock - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "1532751 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDiamondSearch_SingleBlock - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "1532751 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMCFI_Warp1080p",
+            "value": 35567545,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "33 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMCFI_Warp1080p - ns/op",
+            "value": 35567545,
+            "unit": "ns/op",
+            "extra": "33 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMCFI_Warp1080p - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "33 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkMCFI_Warp1080p - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "33 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkPipelineEncode",
+            "value": 14309,
+            "unit": "ns/op\t   65778 B/op\t       5 allocs/op",
+            "extra": "87344 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkPipelineEncode - ns/op",
+            "value": 14309,
+            "unit": "ns/op",
+            "extra": "87344 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkPipelineEncode - B/op",
+            "value": 65778,
+            "unit": "B/op",
+            "extra": "87344 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkPipelineEncode - allocs/op",
+            "value": 5,
+            "unit": "allocs/op",
+            "extra": "87344 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkSadBlock16x16",
+            "value": 11.91,
+            "unit": "ns/op\t42985.74 MB/s\t       0 B/op\t       0 allocs/op",
+            "extra": "100000000 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkSadBlock16x16 - ns/op",
+            "value": 11.91,
+            "unit": "ns/op",
+            "extra": "100000000 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkSadBlock16x16 - MB/s",
+            "value": 42985.74,
+            "unit": "MB/s",
+            "extra": "100000000 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkSadBlock16x16 - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "100000000 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkSadBlock16x16 - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "100000000 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkSadRow_1920",
+            "value": 39.61,
+            "unit": "ns/op\t96941.65 MB/s\t       0 B/op\t       0 allocs/op",
+            "extra": "30338157 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkSadRow_1920 - ns/op",
+            "value": 39.61,
+            "unit": "ns/op",
+            "extra": "30338157 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkSadRow_1920 - MB/s",
+            "value": 96941.65,
+            "unit": "MB/s",
+            "extra": "30338157 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkSadRow_1920 - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "30338157 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkSadRow_1920 - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "30338157 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkSadRow_960",
+            "value": 21.22,
+            "unit": "ns/op\t90501.11 MB/s\t       0 B/op\t       0 allocs/op",
+            "extra": "56628670 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkSadRow_960 - ns/op",
+            "value": 21.22,
+            "unit": "ns/op",
+            "extra": "56628670 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkSadRow_960 - MB/s",
+            "value": 90501.11,
+            "unit": "MB/s",
+            "extra": "56628670 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkSadRow_960 - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "56628670 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkSadRow_960 - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "56628670 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkBlendMix720p",
+            "value": 55898,
+            "unit": "ns/op\t24730.87 MB/s\t       0 B/op\t       0 allocs/op",
+            "extra": "21439 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkBlendMix720p - ns/op",
+            "value": 55898,
+            "unit": "ns/op",
+            "extra": "21439 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkBlendMix720p - MB/s",
+            "value": 24730.87,
+            "unit": "MB/s",
+            "extra": "21439 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkBlendMix720p - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "21439 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkBlendMix720p - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "21439 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkBlendMix1080p",
+            "value": 161541,
+            "unit": "ns/op\t19254.56 MB/s\t       0 B/op\t       0 allocs/op",
+            "extra": "7396 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkBlendMix1080p - ns/op",
+            "value": 161541,
+            "unit": "ns/op",
+            "extra": "7396 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkBlendMix1080p - MB/s",
+            "value": 19254.56,
+            "unit": "MB/s",
+            "extra": "7396 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkBlendMix1080p - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "7396 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkBlendMix1080p - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "7396 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkBlendDip1080p",
+            "value": 22632086,
+            "unit": "ns/op\t 137.43 MB/s\t       0 B/op\t       0 allocs/op",
+            "extra": "52 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkBlendDip1080p - ns/op",
+            "value": 22632086,
+            "unit": "ns/op",
+            "extra": "52 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkBlendDip1080p - MB/s",
+            "value": 137.43,
+            "unit": "MB/s",
+            "extra": "52 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkBlendDip1080p - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "52 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkBlendDip1080p - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "52 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkBlendFTB1080p",
+            "value": 22692856,
+            "unit": "ns/op\t 137.07 MB/s\t       0 B/op\t       0 allocs/op",
+            "extra": "51 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkBlendFTB1080p - ns/op",
+            "value": 22692856,
+            "unit": "ns/op",
+            "extra": "51 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkBlendFTB1080p - MB/s",
+            "value": 137.07,
+            "unit": "MB/s",
+            "extra": "51 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkBlendFTB1080p - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "51 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkBlendFTB1080p - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "51 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkBlendWipe1080p",
+            "value": 275269,
+            "unit": "ns/op\t11299.51 MB/s\t       0 B/op\t       0 allocs/op",
+            "extra": "4560 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkBlendWipe1080p - ns/op",
+            "value": 275269,
+            "unit": "ns/op",
+            "extra": "4560 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkBlendWipe1080p - MB/s",
+            "value": 11299.51,
+            "unit": "MB/s",
+            "extra": "4560 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkBlendWipe1080p - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "4560 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkBlendWipe1080p - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "4560 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkBlendWipeVTop1080p",
+            "value": 1680662,
+            "unit": "ns/op\t1850.70 MB/s\t       0 B/op\t       0 allocs/op",
+            "extra": "693 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkBlendWipeVTop1080p - ns/op",
+            "value": 1680662,
+            "unit": "ns/op",
+            "extra": "693 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkBlendWipeVTop1080p - MB/s",
+            "value": 1850.7,
+            "unit": "MB/s",
+            "extra": "693 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkBlendWipeVTop1080p - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "693 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkBlendWipeVTop1080p - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "693 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkBlendWipeBox1080p",
+            "value": 9242884,
+            "unit": "ns/op\t 336.52 MB/s\t       0 B/op\t       0 allocs/op",
+            "extra": "126 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkBlendWipeBox1080p - ns/op",
+            "value": 9242884,
+            "unit": "ns/op",
+            "extra": "126 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkBlendWipeBox1080p - MB/s",
+            "value": 336.52,
+            "unit": "MB/s",
+            "extra": "126 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkBlendWipeBox1080p - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "126 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkBlendWipeBox1080p - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "126 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkWipeAlphaHLeft1080p",
+            "value": 50675,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "22017 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkWipeAlphaHLeft1080p - ns/op",
+            "value": 50675,
+            "unit": "ns/op",
+            "extra": "22017 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkWipeAlphaHLeft1080p - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "22017 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkWipeAlphaHLeft1080p - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "22017 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkWipeAlphaVTop1080p",
+            "value": 1481391,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "813 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkWipeAlphaVTop1080p - ns/op",
+            "value": 1481391,
+            "unit": "ns/op",
+            "extra": "813 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkWipeAlphaVTop1080p - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "813 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkWipeAlphaVTop1080p - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "813 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkWipeAlphaBoxCenterOut1080p",
+            "value": 8995520,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "133 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkWipeAlphaBoxCenterOut1080p - ns/op",
+            "value": 8995520,
+            "unit": "ns/op",
+            "extra": "133 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkWipeAlphaBoxCenterOut1080p - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "133 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkWipeAlphaBoxCenterOut1080p - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "133 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkBlendMix4K",
+            "value": 772817,
+            "unit": "ns/op\t16099.02 MB/s\t       0 B/op\t       0 allocs/op",
+            "extra": "1569 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkBlendMix4K - ns/op",
+            "value": 772817,
+            "unit": "ns/op",
+            "extra": "1569 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkBlendMix4K - MB/s",
+            "value": 16099.02,
+            "unit": "MB/s",
+            "extra": "1569 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkBlendMix4K - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "1569 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkBlendMix4K - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "1569 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkBlendDip4K",
+            "value": 89912002,
+            "unit": "ns/op\t 138.38 MB/s\t       0 B/op\t       0 allocs/op",
+            "extra": "13 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkBlendDip4K - ns/op",
+            "value": 89912002,
+            "unit": "ns/op",
+            "extra": "13 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkBlendDip4K - MB/s",
+            "value": 138.38,
+            "unit": "MB/s",
+            "extra": "13 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkBlendDip4K - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "13 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkBlendDip4K - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "13 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkBlendFTB4K",
+            "value": 91016718,
+            "unit": "ns/op\t 136.70 MB/s\t       0 B/op\t       0 allocs/op",
+            "extra": "12 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkBlendFTB4K - ns/op",
+            "value": 91016718,
+            "unit": "ns/op",
+            "extra": "12 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkBlendFTB4K - MB/s",
+            "value": 136.7,
+            "unit": "MB/s",
+            "extra": "12 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkBlendFTB4K - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "12 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkBlendFTB4K - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "12 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkBlendWipe4K",
+            "value": 1303065,
+            "unit": "ns/op\t9547.95 MB/s\t       0 B/op\t       0 allocs/op",
+            "extra": "866 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkBlendWipe4K - ns/op",
+            "value": 1303065,
+            "unit": "ns/op",
+            "extra": "866 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkBlendWipe4K - MB/s",
+            "value": 9547.95,
+            "unit": "MB/s",
+            "extra": "866 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkBlendWipe4K - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "866 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkBlendWipe4K - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "866 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkKernelUniform1080p",
+            "value": 160820,
+            "unit": "ns/op\t19340.84 MB/s\t       0 B/op\t       0 allocs/op",
+            "extra": "8190 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkKernelUniform1080p - ns/op",
+            "value": 160820,
+            "unit": "ns/op",
+            "extra": "8190 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkKernelUniform1080p - MB/s",
+            "value": 19340.84,
+            "unit": "MB/s",
+            "extra": "8190 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkKernelUniform1080p - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "8190 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkKernelUniform1080p - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "8190 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkKernelFadeConst1080p",
+            "value": 15222416,
+            "unit": "ns/op\t 136.22 MB/s\t       0 B/op\t       0 allocs/op",
+            "extra": "79 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkKernelFadeConst1080p - ns/op",
+            "value": 15222416,
+            "unit": "ns/op",
+            "extra": "79 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkKernelFadeConst1080p - MB/s",
+            "value": 136.22,
+            "unit": "MB/s",
+            "extra": "79 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkKernelFadeConst1080p - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "79 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkKernelFadeConst1080p - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "79 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkKernelAlpha1080p",
+            "value": 132778,
+            "unit": "ns/op\t15617.01 MB/s\t       0 B/op\t       0 allocs/op",
+            "extra": "8232 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkKernelAlpha1080p - ns/op",
+            "value": 132778,
+            "unit": "ns/op",
+            "extra": "8232 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkKernelAlpha1080p - MB/s",
+            "value": 15617.01,
+            "unit": "MB/s",
+            "extra": "8232 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkKernelAlpha1080p - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "8232 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkKernelAlpha1080p - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "8232 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkWipeAlphaLinear/horizontal_1D",
+            "value": 49391,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "24338 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkWipeAlphaLinear/horizontal_1D - ns/op",
+            "value": 49391,
+            "unit": "ns/op",
+            "extra": "24338 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkWipeAlphaLinear/horizontal_1D - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "24338 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkWipeAlphaLinear/horizontal_1D - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "24338 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkWipeAlphaLinear/vertical_1D",
+            "value": 1475994,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "814 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkWipeAlphaLinear/vertical_1D - ns/op",
+            "value": 1475994,
+            "unit": "ns/op",
+            "extra": "814 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkWipeAlphaLinear/vertical_1D - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "814 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkWipeAlphaLinear/vertical_1D - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "814 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkWipeAlphaLinear/box_per_pixel",
+            "value": 8997327,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "133 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkWipeAlphaLinear/box_per_pixel - ns/op",
+            "value": 8997327,
+            "unit": "ns/op",
+            "extra": "133 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkWipeAlphaLinear/box_per_pixel - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "133 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkWipeAlphaLinear/box_per_pixel - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "133 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDownsampleAlpha2x2_1080p",
+            "value": 58.34,
+            "unit": "ns/op\t16453.95 MB/s\t       0 B/op\t       0 allocs/op",
+            "extra": "20430549 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDownsampleAlpha2x2_1080p - ns/op",
+            "value": 58.34,
+            "unit": "ns/op",
+            "extra": "20430549 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDownsampleAlpha2x2_1080p - MB/s",
+            "value": 16453.95,
+            "unit": "MB/s",
+            "extra": "20430549 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDownsampleAlpha2x2_1080p - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "20430549 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDownsampleAlpha2x2_1080p - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "20430549 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDownsampleAlphaToChroma_1080p",
+            "value": 46058,
+            "unit": "ns/op\t45021.68 MB/s\t       0 B/op\t       0 allocs/op",
+            "extra": "25893 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDownsampleAlphaToChroma_1080p - ns/op",
+            "value": 46058,
+            "unit": "ns/op",
+            "extra": "25893 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDownsampleAlphaToChroma_1080p - MB/s",
+            "value": 45021.68,
+            "unit": "MB/s",
+            "extra": "25893 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDownsampleAlphaToChroma_1080p - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "25893 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkDownsampleAlphaToChroma_1080p - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "25893 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEaseSmoothstep",
+            "value": 3.766,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "319271827 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEaseSmoothstep - ns/op",
+            "value": 3.766,
+            "unit": "ns/op",
+            "extra": "319271827 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEaseSmoothstep - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "319271827 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEaseSmoothstep - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "319271827 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEaseLinear",
+            "value": 3.135,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "381392148 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEaseLinear - ns/op",
+            "value": 3.135,
+            "unit": "ns/op",
+            "extra": "381392148 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEaseLinear - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "381392148 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEaseLinear - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "381392148 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEaseCSS",
+            "value": 21.12,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "56647658 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEaseCSS - ns/op",
+            "value": 21.12,
+            "unit": "ns/op",
+            "extra": "56647658 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEaseCSS - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "56647658 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEaseCSS - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "56647658 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEaseCustom",
+            "value": 32.93,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "36536348 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEaseCustom - ns/op",
+            "value": 32.93,
+            "unit": "ns/op",
+            "extra": "36536348 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEaseCustom - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "36536348 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEaseCustom - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "36536348 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEaseAllPresets/linear",
+            "value": 3.135,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "381806172 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEaseAllPresets/linear - ns/op",
+            "value": 3.135,
+            "unit": "ns/op",
+            "extra": "381806172 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEaseAllPresets/linear - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "381806172 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEaseAllPresets/linear - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "381806172 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEaseAllPresets/ease",
+            "value": 32.55,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "36836509 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEaseAllPresets/ease - ns/op",
+            "value": 32.55,
+            "unit": "ns/op",
+            "extra": "36836509 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEaseAllPresets/ease - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "36836509 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEaseAllPresets/ease - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "36836509 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEaseAllPresets/ease-in",
+            "value": 30.17,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "39731110 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEaseAllPresets/ease-in - ns/op",
+            "value": 30.17,
+            "unit": "ns/op",
+            "extra": "39731110 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEaseAllPresets/ease-in - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "39731110 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEaseAllPresets/ease-in - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "39731110 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEaseAllPresets/ease-out",
+            "value": 30.14,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "39826442 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEaseAllPresets/ease-out - ns/op",
+            "value": 30.14,
+            "unit": "ns/op",
+            "extra": "39826442 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEaseAllPresets/ease-out - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "39826442 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEaseAllPresets/ease-out - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "39826442 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEaseAllPresets/ease-in-out",
+            "value": 21.13,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "56783954 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEaseAllPresets/ease-in-out - ns/op",
+            "value": 21.13,
+            "unit": "ns/op",
+            "extra": "56783954 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEaseAllPresets/ease-in-out - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "56783954 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEaseAllPresets/ease-in-out - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "56783954 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEaseAllPresets/smoothstep",
+            "value": 3.758,
+            "unit": "ns/op\t       0 B/op\t       0 allocs/op",
+            "extra": "318621211 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEaseAllPresets/smoothstep - ns/op",
+            "value": 3.758,
+            "unit": "ns/op",
+            "extra": "318621211 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEaseAllPresets/smoothstep - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "318621211 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkEaseAllPresets/smoothstep - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "318621211 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkScaleBilinearRow_1920",
+            "value": 6263,
+            "unit": "ns/op\t 306.57 MB/s\t       0 B/op\t       0 allocs/op",
+            "extra": "191649 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkScaleBilinearRow_1920 - ns/op",
+            "value": 6263,
+            "unit": "ns/op",
+            "extra": "191649 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkScaleBilinearRow_1920 - MB/s",
+            "value": 306.57,
+            "unit": "MB/s",
+            "extra": "191649 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkScaleBilinearRow_1920 - B/op",
+            "value": 0,
+            "unit": "B/op",
+            "extra": "191649 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkScaleBilinearRow_1920 - allocs/op",
+            "value": 0,
+            "unit": "allocs/op",
+            "extra": "191649 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkScaleYUV420_720pTo1080p",
+            "value": 10246436,
+            "unit": "ns/op\t 303.56 MB/s\t   32768 B/op\t       3 allocs/op",
+            "extra": "100 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkScaleYUV420_720pTo1080p - ns/op",
+            "value": 10246436,
+            "unit": "ns/op",
+            "extra": "100 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkScaleYUV420_720pTo1080p - MB/s",
+            "value": 303.56,
+            "unit": "MB/s",
+            "extra": "100 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkScaleYUV420_720pTo1080p - B/op",
+            "value": 32768,
+            "unit": "B/op",
+            "extra": "100 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkScaleYUV420_720pTo1080p - allocs/op",
+            "value": 3,
+            "unit": "allocs/op",
+            "extra": "100 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkScaleYUV420_1080pTo720p",
+            "value": 4578802,
+            "unit": "ns/op\t 301.91 MB/s\t   20992 B/op\t       3 allocs/op",
+            "extra": "262 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkScaleYUV420_1080pTo720p - ns/op",
+            "value": 4578802,
+            "unit": "ns/op",
+            "extra": "262 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkScaleYUV420_1080pTo720p - MB/s",
+            "value": 301.91,
+            "unit": "MB/s",
+            "extra": "262 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkScaleYUV420_1080pTo720p - B/op",
+            "value": 20992,
+            "unit": "B/op",
+            "extra": "262 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkScaleYUV420_1080pTo720p - allocs/op",
+            "value": 3,
+            "unit": "allocs/op",
+            "extra": "262 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkScaleLanczos_1080to720",
+            "value": 35243261,
+            "unit": "ns/op\t  39.22 MB/s\t  259433 B/op\t       3 allocs/op",
+            "extra": "32 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkScaleLanczos_1080to720 - ns/op",
+            "value": 35243261,
+            "unit": "ns/op",
+            "extra": "32 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkScaleLanczos_1080to720 - MB/s",
+            "value": 39.22,
+            "unit": "MB/s",
+            "extra": "32 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkScaleLanczos_1080to720 - B/op",
+            "value": 259433,
+            "unit": "B/op",
+            "extra": "32 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkScaleLanczos_1080to720 - allocs/op",
+            "value": 3,
+            "unit": "allocs/op",
+            "extra": "32 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkScaleLanczos_720to1080",
+            "value": 33723295,
+            "unit": "ns/op\t  92.23 MB/s\t      87 B/op\t       3 allocs/op",
+            "extra": "33 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkScaleLanczos_720to1080 - ns/op",
+            "value": 33723295,
+            "unit": "ns/op",
+            "extra": "33 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkScaleLanczos_720to1080 - MB/s",
+            "value": 92.23,
+            "unit": "MB/s",
+            "extra": "33 times\n4 procs"
+          },
+          {
+            "name": "BenchmarkScaleLanczos_720to1080 - B/op",
+            "value": 87,
             "unit": "B/op",
             "extra": "33 times\n4 procs"
           },
