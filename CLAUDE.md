@@ -27,13 +27,13 @@ server/                          # Go module (github.com/zsiec/switchframe/serve
     admin.go                     #   Admin/debug HTTP endpoints
   switcher/                      # Core switching engine
     switcher.go                  #   State machine: Cut(), SetPreview(), frame routing, audio handler
-    source_viewer.go             #   Per-source Viewer proxy (atomic.Pointer for lock-free hot path)
+    source_viewer.go             #   Per-source Viewer proxy (atomic.Pointer for lock-free hot path, srcDecoder for always-decode)
+    source_decoder.go            #   Per-source H.264→YUV420 decoder goroutine (always-decode architecture)
     frame_sync.go                #   FrameSynchronizer: freerun frame alignment (90 kHz PTS)
     health.go                    #   Source health monitor (stale/no_signal/offline)
     delay_buffer.go              #   Per-source frame delay buffer (0-500ms)
-    gop_cache.go                 #   GOP cache for instant keyframe on cut
     processing_frame.go          #   ProcessingFrame: raw YUV420 carrier through pipeline
-    pipeline_codecs.go           #   Shared decoder/encoder pool for video processing chain
+    pipeline_codecs.go           #   Encoder-only pool for video processing chain (decoders moved to per-source)
   audio/                         # Audio mixing engine
     mixer.go                     #   Per-channel decode/mix/encode, passthrough optimization
     codec.go                     #   AudioDecoder/AudioEncoder interfaces + factory types
@@ -110,7 +110,7 @@ server/                          # Go module (github.com/zsiec/switchframe/serve
     compositor.go                #   DSK compositor (template → overlay → program)
     keyer.go                     #   Chroma/luma key generation in YUV420 domain
     key_processor.go             #   Upstream key chain (per-source, before mix)
-    key_processor_bridge.go      #   KeyProcessorBridge: fill decode + ProcessYUV for pipeline
+    key_processor_bridge.go      #   KeyProcessorBridge: IngestFillYUV + ProcessYUV for pipeline
   preset/                        # Switcher preset save/recall
     store.go                     #   Preset storage (file-based)
     recall.go                    #   Preset recall logic
@@ -238,13 +238,13 @@ Dockerfile                       # Multi-stage build (UI → Go → runtime)
 1. **This file** — layout and conventions
 2. **[docs/locking-and-concurrency.md](docs/locking-and-concurrency.md)** — lock inventory, frame flow diagrams, lock ordering rules, deadlock-free guarantees
 
-## Current State (MVP + Production Hardening — Phases 1-22)
+## Current State (MVP + Production Hardening — Phases 1-23)
 
 - **Branch:** `main`
 - **Tests:** ~1345 Go tests + 590 Vitest tests + 47 E2E tests passing with `-race`
 - **What works:** Everything from Phases 1-5 + Simple Mode (volunteer-friendly layout), video/audio playback pipeline (MoQ → decoder → canvas), PFL audio decode + metering, FTB reverse toggle (smooth fade-in), recording file rotation (time + size), SRT wired to real zsiec/srtgo (pure Go), ring buffer overflow monitoring with reconnect callback, static file embedding (single binary), Dockerfile (multi-stage), GitHub Actions CI, Makefile with dev/build/docker/test targets, `make demo` with 4 simulated cameras (`--demo` flag)
 - **Phase 6 (Instrumentation):** Prometheus metrics, debug snapshot collector, event log, admin endpoints
-- **Phase 7 (Production Hardening):** Source delay buffer, GOP cache, auth middleware, brickwall limiter, async output adapter, codec stubs, DSK graphics compositor
+- **Phase 7 (Production Hardening):** Source delay buffer, auth middleware, brickwall limiter, async output adapter, codec stubs, DSK graphics compositor
 - **Phase 8 (Testing Hardening):** Codec fuzz tests (found+fixed SplitADTSFrames bug), benchmark suite (19 benchmarks), stress tests (6), integration gap tests (12), soak test, frontend stress tests (6)
 - **Phase 9 (Audio Polish):** Per-channel audio input trim (-20 to +20 dB), per-channel audio metering, PCM pre-buffering for crossfade gap elimination
 - **Phase 10 (Output Confidence):** ConfidenceMonitor for 1fps JPEG thumbnail of program output, `GET /api/output/confidence` endpoint
@@ -259,7 +259,8 @@ Dockerfile                       # Multi-stage build (UI → Go → runtime)
 - **Phase 19 (Missing UI Panels):** PresetPanel (save/recall/delete, 6th BottomTab), source delay slider + badge, stinger upload/delete UI, confirm mode toggle, compressor bypass toggle, complete keyboard overlay, FTB button in simple mode, source health indicators in simple mode
 - **Phase 20 (Replay & Keying Polish):** Replay timecode display (HH:MM:SS.mmm mark-in/out + clip duration), HiDPI canvas for replay monitor, ReplayPanel design system migration (hex → CSS variables), key color picker (green/blue presets + RGB picker with BT.709 YCbCr conversion), load key config on source select
 - **Phase 21 (Broadcast Quality & Feature Completeness):** Video processing channel depth fix (2→4), H.264 colorspace signaling (BT.709), limited-range black level default (Y=16), per-channel biquad EQ state (stereo crosstalk fix), chroma key squared distance + configurable spill replacement color, Lanczos-3 scaler with auto-selection, replay frame blending + interpolator interface, per-source audio delay buffer (lip-sync correction 0-500ms), BS.1770-4 LUFS loudness metering (K-weighted filtering, momentary/short-term/integrated with dual gating), replay audio with WSOLA time-stretching (pitch-preserved slow-motion), multi-destination SRT output (add/remove/start/stop per-destination lifecycle)
-- **Phase 22 (Performance Hardening):** Buffer-reuse APIs for NALU conversion (`AVC1ToAnnexBInto`, `PrependSPSPPSInto`), crossfade lookup table + `Into` variants, per-source frame sync locks, `statsMu` removal (atomic `lastGroupID`), sync.Pool for AVC1/GOP buffers, deep-copy YUV before async enqueue (race fix), `putGOPBuf` dangling pointer fix, GOP cache single-lock acquisition, frame deadline monitoring, `videoProcCh` buffer 4→8, cache line padding on source viewer atomics, lock-free delay buffer callbacks, wipe/stinger direct chroma alpha + SIMD `blendAlpha` for chroma planes, mixer hot-path allocation elimination (crossfade/MXL sink buffers), mix accumulation loop BCE optimization, `GOGC=400` default, system tuning check (`RLIMIT_NOFILE`), TSMuxer buffer reuse
+- **Phase 22 (Performance Hardening):** Buffer-reuse APIs for NALU conversion (`AVC1ToAnnexBInto`, `PrependSPSPPSInto`), crossfade lookup table + `Into` variants, per-source frame sync locks, `statsMu` removal (atomic `lastGroupID`), sync.Pool for AVC1 buffers, deep-copy YUV before async enqueue (race fix), frame deadline monitoring, `videoProcCh` buffer 4→8, cache line padding on source viewer atomics, lock-free delay buffer callbacks, wipe/stinger direct chroma alpha + SIMD `blendAlpha` for chroma planes, mixer hot-path allocation elimination (crossfade/MXL sink buffers), mix accumulation loop BCE optimization, `GOGC=400` default, system tuning check (`RLIMIT_NOFILE`), TSMuxer buffer reuse
+- **Phase 23 (Always-Decode Architecture):** Per-source H.264→YUV420 decoder goroutines (`source_decoder.go`), switcher operates entirely on decoded frames, GOP cache / pendingIDR / replayGOP / feedDeltaFrames deleted, transition engine receives raw YUV (no decoder warmup), upstream key bridge uses `IngestFillYUV` (no H.264 decode), pipeline_codecs is encoder-only, enabled via `--decode-all-sources` CLI flag, per-source decoders inherit hardware acceleration (VideoToolbox/VA-API/NVDEC) automatically
 - **MXL Integration:** Shared-memory media transport for uncompressed V210 video + float32 audio. `mxl/` package with cgo bindings (build tag: `mxl`), flow discovery (NMOS IS-04), V210↔YUV420p conversion, Reader/Writer/Source/Output orchestrators. Triple fan-out: raw YUV to switcher, raw PCM to mixer, H.264/AAC encoded to browser relay. Program output routed back to MXL via sink callbacks. `make mxl-demo` runs GStreamer test sources + Switchframe + UI. Stub implementation for non-MXL builds.
 - **What's stubbed:** ISO per-source recording (v2.5), WebGPU dissolve (Canvas 2D fallback works)
 
@@ -267,8 +268,8 @@ Dockerfile                       # Multi-stage build (UI → Go → runtime)
 
 - **Commands:** REST POST over HTTP/3 (NOT MoQ custom messages — spec says unknown types cause PROTOCOL_VIOLATION)
 - **State broadcast:** MoQ "control" track with JSON (full snapshot per group for late-join)
-- **Frame routing:** Per-source `sourceViewer` implements `distribution.Viewer`, tags frames with source key. Uses `atomic.Pointer[T]` for lock-free reads on hot path. Switcher forwards only program source's frames to program Relay.
-- **Keyframe gating:** After a cut, the GOP cache replays the new source's recent frames to warm the pipeline decoder, avoiding a keyframe wait. The `pendingIDR` flag is only used as a fallback when no GOP replay is available.
+- **Frame routing:** Per-source `sourceViewer` implements `distribution.Viewer`, tags frames with source key. Uses `atomic.Pointer[T]` for lock-free reads on hot path. Each source has an associated `sourceDecoder` (atomic pointer) that continuously decodes H.264→YUV420. Switcher forwards only program source's decoded frames to the processing pipeline.
+- **Always-decode architecture:** Every H.264 source gets a dedicated `sourceDecoder` goroutine that continuously decodes to raw YUV420. Enabled via `--decode-all-sources` CLI flag. Per-source decoders inherit hardware acceleration (VideoToolbox/VA-API/NVDEC) automatically via the `codec.NewVideoDecoder` factory. Eliminates GOP cache, pendingIDR flag, replayGOP, and feedDeltaFrames — cuts are instant because every source always has a current decoded frame. The transition engine's `DecoderFactory` is optional (nil when both sources provide raw YUV).
 - **Prism extension:** `ServerConfig.ExtraRoutes` added to Prism for mounting Switchframe's REST API on Prism's mux.
 - **Frontend:** Svelte 5 + SvelteKit with static adapter (for Go binary embed)
 - **Vendored Prism TS:** Transport, decode, render modules copied to ui/src/lib/prism/ for full control
@@ -280,7 +281,7 @@ Dockerfile                       # Multi-stage build (UI → Go → runtime)
 - **PFL:** Client-side only, per-operator, no server involvement
 - **Program relay bridge:** Use `server.RegisterStream("program")` relay directly (zero extra Prism changes)
 - **AFV wiring:** State callback triggers `mixer.OnProgramChange` before state broadcast to browsers
-- **Dissolve transitions:** Server-side FFmpeg decode → YUV420 blend → encode (High profile, medium preset). Always-on re-encode ensures consistent SPS/PPS across transition boundaries.
+- **Dissolve transitions:** Server-side YUV420 blend → encode (High profile, medium preset). Sources arrive pre-decoded via `IngestRawFrame` — no decoder warmup needed. Always-on re-encode ensures consistent SPS/PPS across transition boundaries. `TransitionEngine.DecoderFactory` is optional (nil when both sources are already raw YUV).
 - **Transition engine:** Created per-transition, destroyed on complete/abort. Wall-clock frame pairing with smoothstep easing, output driven by incoming source. Encoder bitrate/fps derived from source stream statistics.
 - **Blend colorspace:** YUV420 (BT.709 domain) matching hardware broadcast mixers (ATEM, Ross). Avoids costly YUV↔RGB round-trip.
 - **Wipe transitions:** 6 directions (h-left, h-right, v-top, v-bottom, box-center-out, box-edges-in) using per-pixel threshold mask with 4px soft edge in YUV420 domain.
@@ -309,20 +310,19 @@ Dockerfile                       # Multi-stage build (UI → Go → runtime)
 - **Multiview audio bars:** 4px vertical bar on right edge of SourceTile. Green → yellow (>-12dB) → red (>-3dB). Data from existing state broadcast `audioLevels`.
 - **Macro system:** File-based JSON store at `~/.switchframe/macros.json` (mirrors `preset/store.go` pattern). `MacroTarget` interface for testability. Sequential executor with `time.After` + `ctx.Done` select for wait/cancellation.
 - **Responsive layout:** CSS-only media queries at 4 breakpoints (1920/1024/768px). `@media (pointer: coarse)` for 44px touch targets. AudioMixer collapses below 1024px.
-- **Upstream keying:** Chroma/luma key generation in YUV420 domain (matches blend architecture). `KeyProcessor` applies per-source key chain before DSK compositing. Cb/Cr distance for chroma, Y threshold for luma, with smoothness feathering.
+- **Upstream keying:** Chroma/luma key generation in YUV420 domain (matches blend architecture). `KeyProcessor` applies per-source key chain before DSK compositing. Cb/Cr distance for chroma, Y threshold for luma, with smoothness feathering. `KeyProcessorBridge` uses `IngestFillYUV` (raw YUV input, no H.264 decode).
 - **Instant replay:** Per-source GOP-aligned circular buffers with wall-clock clipping. `replayBuffer.ExtractClip(inTime, outTime)` returns video frames + audio frames. Player decodes clip, sorts by PTS, estimates FPS, re-encodes with frame duplication for slow-mo (`dupCount = ceil(1/speed)`). Audio time-stretched via WSOLA for pitch-preserved slow-motion. Frame blending via pluggable `FrameInterpolator` interface (default: alpha blend). Output paced at source FPS via timers. Replay routed to dedicated `"replay"` relay registered via `server.RegisterStream("replay")`.
 - **Operator management:** File-based operator store at `~/.switchframe/operators.json`. 4 roles (director/audio/graphics/viewer) with 5 lockable subsystems (switching/audio/graphics/replay/output). Per-operator 64-char hex bearer tokens. `SessionManager` tracks heartbeats with 60s stale timeout and 15s cleanup interval. `OperatorMiddleware` enforces role permission + lock ownership on every command (GET requests exempt). Backward-compatible: no operators registered = all requests pass through.
 - **Replay relay:** Registered as `server.RegisterStream("replay")`. Replay player output broadcast to this relay so browsers can subscribe via MoQ for replay monitoring.
-- **Raw YUV pipeline:** Video processing chain (key bridge → compositor) operates on raw YUV420 with a single decode at ingest and single encode at output. Eliminates multi-encode generation loss. TransitionEngine outputs raw YUV via callback; `pipelineCodecs` manages the shared encoder/decoder pool. Always-on re-encode: every program frame flows through decode→encode for consistent SPS/PPS, eliminating browser VideoDecoder reconfigurations at transition boundaries. Audio passthrough optimization is unchanged.
+- **Raw YUV pipeline:** All sources are continuously decoded to raw YUV420 by per-source decoder goroutines (`sourceDecoder`). The entire video processing chain (key bridge → compositor → transition engine) operates on raw YUV420 with a single encode at output. Eliminates multi-encode generation loss. `pipelineCodecs` manages the encoder-only pool (decoders moved to per-source). Always-on re-encode: every program frame flows through encode for consistent SPS/PPS, eliminating browser VideoDecoder reconfigurations at transition boundaries. This is the only path for all sources — both Prism H.264 streams and MXL uncompressed sources flow through the same raw YUV pipeline. Audio passthrough optimization is unchanged.
 - **LUFS loudness metering:** BS.1770-4 compliant K-weighted loudness meter. Two-stage K-weighting (head-related shelf + RLB biquad). Three windows: momentary (400ms), short-term (3s), integrated (dual gating: absolute -70 LUFS + relative -10 LU). Fed after master fader, before limiter. EBU R128 color coding in UI (green ≤-23, yellow ≤-14, red above).
 - **WSOLA time-stretching:** Waveform Similarity Overlap-Add for pitch-preserved audio slow-motion. Hann window overlap-add with normalized cross-correlation search. Window size 1024 samples, search range 256. Passthrough at 1.0x speed.
 - **Lanczos-3 scaler:** Broadcast-quality Lanczos-3 kernel scaler with sinc-based interpolation. Auto-selected for quality scaling (transitions, replay), bilinear used for speed-critical paths. `ScaleYUV420WithQuality(quality)` factory function.
 - **Multi-destination SRT:** Per-destination `OutputDestination` with independent lifecycle (add/remove/start/stop). Each destination gets its own `AsyncAdapter` wrapper. CRUD API at `/api/output/destinations`. Destinations included in adapter fan-out via `rebuildAdaptersLocked()`. State change callbacks trigger ControlRoomState broadcast.
-- **Buffer-reuse NALU APIs:** `AVC1ToAnnexBInto(avc1, dst)` and `PrependSPSPPSInto(sps, pps, data, dst)` write into caller-provided buffers for zero-allocation steady-state. TSMuxer, GOP cache, and confidence monitor use persistent buffers. Original functions delegate to `Into` variants with `nil`.
+- **Buffer-reuse NALU APIs:** `AVC1ToAnnexBInto(avc1, dst)` and `PrependSPSPPSInto(sps, pps, data, dst)` write into caller-provided buffers for zero-allocation steady-state. TSMuxer and confidence monitor use persistent buffers. Original functions delegate to `Into` variants with `nil`.
 - **Crossfade lookup table:** 1024-entry precomputed cos/sin tables replace per-sample `math.Cos`/`math.Sin`. `EqualPowerCrossfadeStereoInto(dst, old, new, channels)` accepts a reusable buffer. Mixer stores `crossfadeBuf` field.
 - **Per-source frame sync locks:** `syncSource` has its own `sync.Mutex`. Ingest acquires global `fs.mu` briefly for source lookup, then per-source `ss.mu` for ring buffer ops. Tick release acquires each source lock individually.
 - **Lock-free source stats:** `sourceState.statsMu` eliminated. Frame stats are single-writer (source viewer goroutine). `lastGroupID` changed to `atomic.Uint32` for lock-free reads.
-- **GOP buffer pool fix:** `gopBufPool` stores `[]byte` values directly instead of `*[]byte` pointers. The old pattern pooled pointers to stack locals (useless/UB). Single lock acquisition in `RecordFrame` eliminates double-lock per frame.
 - **AVC1 buffer pool:** `sync.Pool` in `pipeline_codecs.go` recycles 50-150KB AVC1 output buffers. `putAVC1Buffer` called after program relay broadcast.
 - **Transition YUV deep-copy:** `broadcastProcessed()` deep-copies YUV buffer before async enqueue to prevent race with `FrameBlender` reuse.
 - **Frame deadline monitoring:** `frameBudgetNs` (default 33ms) and `deadlineViolations` atomic counter. Exposed in `DebugSnapshot()`.
