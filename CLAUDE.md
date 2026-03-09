@@ -79,6 +79,14 @@ server/                          # Go module (github.com/zsiec/switchframe/serve
     middleware.go                #   HTTP middleware (logging, auth, metrics)
     api_format.go                #   Format preset API: GET/PUT /api/format
     errmap.go                    #   Error code mapping utilities
+    api_scte35.go                #   SCTE-35 handlers: cue inject, return, cancel, hold, extend, rules CRUD
+  scte35/                        # SCTE-35 ad insertion & signal conditioning
+    message.go                   #   CueMessage types wrapping Comcast/scte35-go (encode/decode)
+    injector.go                  #   Core lifecycle: inject, schedule, auto-return, hold, extend, heartbeat
+    parser.go                    #   Pass-through TS parser with CRC validation, PID detection
+    rules.go                     #   Signal conditioning rules engine (first-match-wins, AND/OR logic)
+    rules_store.go               #   File-based rules CRUD with preset templates
+    webhook.go                   #   Async webhook dispatcher for external integrations
   transition/                    # Transition engine
     engine.go                    #   TransitionEngine lifecycle (start/ingest/complete/abort)
     blend.go                     #   YUV420 blending (mix, dip, wipe, FTB, stinger)
@@ -174,7 +182,7 @@ ui/                              # SvelteKit frontend (Svelte 5 + TypeScript)
       api/                       # REST API client + TypeScript types
         types.ts                 #   ControlRoomState, SourceInfo, TallyStatus, AudioChannel types
         switch-api.ts            #   Full REST client: cut, preview, transition, audio (EQ/compressor),
-                                 #     presets, stinger, recording, SRT, graphics, macros, keying
+                                 #     presets, stinger, recording, SRT, graphics, macros, keying, SCTE-35
         base-url.ts              #   API base URL routing (same-origin prod, QUIC origin dev)
       state/                     # Reactive state management
         control-room.svelte.ts   #   Svelte 5 $state store with MoQ update handler
@@ -239,7 +247,8 @@ ui/                              # SvelteKit frontend (Svelte 5 + TypeScript)
       LockIndicator.svelte       #   Subsystem lock status indicator
       PresetPanel.svelte         #   Preset save/recall/delete panel
       ServerPipelineOverlay.svelte #  Server pipeline visualization overlay
-      BottomTabs.svelte          #   Tabbed bottom panel (Audio/Graphics/Macros/Keys/Replay/Presets)
+      SCTE35Panel.svelte          #   SCTE-35 ad insertion panel (quick actions, cue builder, event log)
+      BottomTabs.svelte          #   Tabbed bottom panel (Audio/Graphics/Macros/Keys/Replay/Presets/SCTE-35)
       auto-animation.svelte.ts   #   Auto transition animation state
     lib/layout/                  # Layout mode management
       preferences.ts             #   URL param + localStorage detection/persistence
@@ -283,6 +292,7 @@ Dockerfile                       # Multi-stage build (UI → Go → runtime)
 - **Phase 23 (Always-Decode Architecture):** Per-source H.264→YUV420 decoder goroutines (`source_decoder.go`), switcher operates entirely on decoded frames, GOP cache / pendingIDR / replayGOP / feedDeltaFrames deleted, transition engine receives raw YUV (no decoder warmup), upstream key bridge uses `IngestFillYUV` (no H.264 decode), pipeline_codecs is encoder-only, enabled via `--decode-all-sources` CLI flag, per-source decoders inherit hardware acceleration (VideoToolbox/VA-API/NVDEC) automatically
 - **MXL Integration:** Shared-memory media transport for uncompressed V210 video + float32 audio. `mxl/` package with cgo bindings (build tag: `mxl`), flow discovery (NMOS IS-04), V210↔YUV420p conversion, Reader/Writer/Source/Output orchestrators. Triple fan-out: raw YUV to switcher, raw PCM to mixer, H.264/AAC encoded to browser relay. Program output routed back to MXL via sink callbacks. `make mxl-demo` runs GStreamer test sources + Switchframe + UI. Stub implementation for non-MXL builds.
 - **Phase 24 (Low-Latency Control + Raw Monitor):** HTTP/3 control commands via QUIC (replacing TCP :8081 default), MoQ control track wiring (event-driven state push replacing 500ms polling), CORS middleware on ExtraRoutes, cert-hash on admin server for dev bootstrapping, `--http-fallback` opt-in TCP :8081, API base URL routing (`base-url.ts`), mkcert support (`--tls-cert`/`--tls-key`, `make setup-mkcert`), raw YUV420 program monitor (`--raw-program-monitor`, `--raw-monitor-scale`), WebGL YUV→RGB renderer (`yuv-renderer.ts`), `program-raw` MoQ track with 8-byte header + planar YUV, format preset API (`GET/PUT /api/format`), easing curves for transitions, frame rate conversion with MCFI + SIMD SAD kernels (`--frc-quality`)
+- **Phase 25 (SCTE-35 Ad Insertion):** Real-time SCTE-35 splice_insert and time_signal injection into MPEG-TS output. `server/scte35/` package wrapping `Comcast/scte35-go v1.7.1`. Injector with PTS-synchronized timing, auto-return timers, hold/extend break management, splice_null heartbeat. Signal conditioning rules engine (first-match-wins, AND/OR compound conditions, 5 preset templates). File-based rules store at `~/.switchframe/scte35_rules.json`. Pass-through parser with CRC validation and multi-packet reassembly. Async webhook dispatcher. TSMuxer integration with SCTE-35 PID 0x102, PMT registration (stream_type 0x86), CUEI registration descriptor, PSI section framing. Per-destination SCTE-35 enable/disable. Synthetic break state for SRT late-join. 17 REST API endpoints. 5 macro actions (scte35_cue/return/cancel/hold/extend). CLI flags (`--scte35`, `--scte35-pid`, `--scte35-preroll`, `--scte35-heartbeat`, `--scte35-verify`, `--scte35-webhook`). State broadcast via ControlRoomState.scte35. SCTE35Panel.svelte UI (quick actions, advanced cue builder, event log). Keyboard shortcuts (Shift+B/R/H/E). BottomTabs 7th tab (Ctrl+Shift+7).
 - **What's stubbed:** ISO per-source recording (v2.5), WebGPU dissolve (Canvas 2D fallback works)
 
 ## Key Architecture Decisions
@@ -363,6 +373,7 @@ Dockerfile                       # Multi-stage build (UI → Go → runtime)
 - **Format presets API:** `GET /api/format` returns current pipeline format and available presets. `PUT /api/format` accepts preset name or custom `{width, height, fpsNum, fpsDen}`.
 - **Frame rate conversion (FRC):** Optional frame rate conversion with 4 quality levels: `none` (passthrough), `nearest` (nearest-frame), `blend` (alpha blend), `mcfi` (motion-compensated frame interpolation with SIMD SAD kernels in `frcasm/`). Enabled via `--frc-quality` flag. `make demo` defaults to `mcfi`. Works with the frame synchronizer to normalize mixed-rate sources to the pipeline format.
 - **Platform SIMD kernels:** Graphics (alpha blend, chroma key, luma key) and transitions (blend, downsample, scaler, Lanczos) have platform-specific SIMD implementations for amd64 and arm64 with generic Go fallbacks. FRC uses hand-written assembly SAD kernels in `switcher/frcasm/`.
+- **SCTE-35 ad insertion:** `server/scte35/` package wrapping `Comcast/scte35-go v1.7.1`. `Injector` manages active events with PTS-synchronized timing from `Switcher.LastBroadcastVideoPTS()` (atomic load, 90kHz clock). Auto-return via `time.Timer`, hold/extend for break management, splice_null heartbeat goroutine. `RuleEngine` for signal conditioning with first-match-wins evaluation, AND/OR compound conditions, 8 operators (=, !=, >, <, >=, <=, range, contains, matches), destination filtering. `RulesStore` for file-based CRUD at `~/.switchframe/scte35_rules.json` with 5 preset templates. `ParseFromTS()` for pass-through SCTE-35 extraction with CRC validation and multi-packet reassembly. TSMuxer integration: SCTE-35 PID 0x102 with stream_type 0x86, CUEI registration descriptor (format_identifier 0x43554549), PSI section framing (not PES), continuity counter. `WriteSCTE35(data)` queues encoded sections for next TS packet flush. Per-destination `SCTE35Enabled` flag. `SyntheticBreakState()` generates splice_insert for SRT late-join. 17 REST endpoints at `/api/scte35/*`. 5 macro actions (scte35_cue/return/cancel/hold/extend). `WebhookDispatcher` for async HTTP POST notifications. State broadcast via `ControlRoomState.SCTE35`. SCTE35Panel.svelte with three-zone layout (quick actions + advanced cue builder + event log). Keyboard shortcuts: Shift+B (ad break), Shift+R (return), Shift+H (hold), Shift+E (extend).
 
 ## Prism Dependency
 
