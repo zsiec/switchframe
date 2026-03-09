@@ -43,11 +43,12 @@ server/                          # Go module (github.com/zsiec/switchframe/serve
     format.go                    #   Video format definitions (resolution/fps presets)
     frc.go                       #   Frame rate conversion engine base
     frc_me.go                    #   FRC motion estimation (MCFI)
-    frc_warp.go                  #   FRC frame warping
+    mcfi_interpolate.go          #   MCFIState: standalone MCFI interpolator (replay FrameInterpolator)
+    mcfi_warp_fast.go            #   mcfiInterpolateFast: 16.16 fixed-point row-parallel warp
     frcasm/                      #   SIMD SAD kernels (amd64/arm64 assembly)
     types.go                     #   Switcher internal types
   audio/                         # Audio mixing engine
-    mixer.go                     #   Per-channel decode/mix/encode, passthrough optimization
+    mixer.go                     #   Per-channel decode/mix/encode, passthrough optimization, stinger audio overlay
     codec.go                     #   AudioDecoder/AudioEncoder interfaces + factory types
     fdk_cgo.go                   #   Centralized cgo CFLAGS/LDFLAGS for fdk-aac
     fdk_decoder.go               #   FDK AAC decoder (direct cgo wrapper)
@@ -69,7 +70,7 @@ server/                          # Go module (github.com/zsiec/switchframe/serve
     api_output.go                #   Output handlers: recording, SRT, confidence, destinations
     api_graphics.go              #   Graphics/stinger handlers: on/off, frame upload, stinger CRUD
     api_preset.go                #   Preset handlers: CRUD, recall, stateToSnapshot
-    api_macro.go                 #   Macro handlers: CRUD, run
+    api_macro.go                 #   Macro handlers: CRUD, run, dismiss, cancel, execution broadcast
     api_replay.go                #   Replay handlers: mark-in/out, play, stop, status, sources
     api_keying.go                #   Upstream key handlers: set/get/delete source key
     api_operator.go              #   Operator management HTTP handlers (register, lock, heartbeat)
@@ -87,6 +88,12 @@ server/                          # Go module (github.com/zsiec/switchframe/serve
     rules.go                     #   Signal conditioning rules engine (first-match-wins, AND/OR logic)
     rules_store.go               #   File-based rules CRUD with preset templates
     webhook.go                   #   Async webhook dispatcher for external integrations
+  scte104/                       # SCTE-104 automation protocol (MXL ancillary data ↔ SCTE-35)
+    message.go                   #   Message, Operation, SpliceRequest, SegDescRequest types
+    decode.go                    #   Decode(): binary SCTE-104 message parser (SOM + MOM)
+    encode.go                    #   Encode(): binary serializer (always MOM format)
+    st291.go                     #   ParseST291/WrapST291: SMPTE ST 291 VANC framing (DID=0x41/SDID=0x07)
+    translate.go                 #   ToCueMessage/FromCueMessage: bidirectional SCTE-104↔SCTE-35 translation
   transition/                    # Transition engine
     engine.go                    #   TransitionEngine lifecycle (start/ingest/complete/abort)
     blend.go                     #   YUV420 blending (mix, dip, wipe, FTB, stinger)
@@ -111,8 +118,9 @@ server/                          # Go module (github.com/zsiec/switchframe/serve
     async_adapter.go             #   Async write adapter (non-blocking output)
     destination.go               #   Multi-destination types and lifecycle (DestinationConfig/Status)
   stinger/                       # Stinger transition clips
-    store.go                     #   StingerStore: load/upload/delete PNG sequences, path traversal
-                                 #     prevention, maxClips limit, sentinel errors
+    store.go                     #   StingerStore: load/upload/delete PNG sequences + optional WAV audio,
+                                 #     path traversal prevention, maxClips limit, sentinel errors
+    wav.go                       #   ParseWAV: WAV file parser (PCM int16 + IEEE float32 support)
   codec/                         # Video codec infrastructure + NALU/ADTS helpers
     ffmpeg_cgo.go                #   FFmpeg cgo CFLAGS/LDFLAGS (libavcodec/libavutil)
     ffmpeg_encoder.go            #   FFmpegEncoder (x264/NVENC/VA-API/VideoToolbox)
@@ -141,9 +149,10 @@ server/                          # Go module (github.com/zsiec/switchframe/serve
     store.go                     #   Preset storage (file-based)
     recall.go                    #   Preset recall logic
   macro/                         # Macro system
-    types.go                     #   Macro, MacroStep, MacroAction types
-    store.go                     #   File-based JSON CRUD (atomic writes)
+    types.go                     #   Macro, MacroStep, MacroAction, ExecutionState, StepState, OnProgress types
+    store.go                     #   File-based JSON CRUD (atomic writes, ValidateSteps on save)
     runner.go                    #   Sequential executor with delays + context cancellation
+    validate.go                  #   ValidateSteps: pre-save validation (errors block save, warnings informational)
   operator/                      # Multi-operator management
     types.go                     #   Role/Subsystem enums, permission matrix, Operator/Session types
     store.go                     #   File-based operator registration (JSON, atomic writes)
@@ -154,8 +163,13 @@ server/                          # Go module (github.com/zsiec/switchframe/serve
     buffer.go                    #   Per-source GOP-aligned circular buffer with wall-clock clipping
     viewer.go                    #   distribution.Viewer for capturing source frames to buffer
     player.go                    #   Decode → re-encode pipeline with frame duplication for slow-mo
-    wsola.go                     #   WSOLA time-stretching for pitch-preserved slow-motion audio
-    interpolator.go              #   FrameInterpolator interface + blend interpolator for slow-mo
+    wsola.go                     #   WSOLA time-stretching (fallback for phase vocoder failures)
+    phasevocoder.go              #   Phase vocoder: STFT-based pitch-preserved time-stretching (primary)
+    fft.go                       #   Radix-2 Cooley-Tukey FFT with precomputed twiddles
+    fft_butterfly_amd64.go       #   amd64 SIMD butterfly kernel
+    fft_butterfly_arm64.go       #   arm64 NEON butterfly kernel
+    fft_butterfly_generic.go     #   Generic Go butterfly fallback
+    interpolator.go              #   FrameInterpolator interface + blend + MCFI interpolators
     manager.go                   #   Replay orchestration: mark-in/out, play, stop, per-source buffers
   mxl/                           # MXL shared-memory media transport integration
     types.go                     #   FlowOpener, DiscreteReader/Writer, ContinuousReader/Writer interfaces
@@ -164,17 +178,20 @@ server/                          # Go module (github.com/zsiec/switchframe/serve
     stub.go                      #   Stub implementation (non-MXL builds): returns ErrMXLNotAvailable
     discovery.go                 #   Discover(): scan MXL domain for *.mxl-flow dirs, check active status
     discovery_parse.go           #   parseFlowDef(): NMOS IS-04 flow definition JSON parser
-    reader.go                    #   Reader: videoLoop/audioLoop goroutines, error recovery, PTS tracking
-    writer.go                    #   Writer: steady-rate ticker video output, wall-clock audio indices
-    source.go                    #   Source: MXL flow → triple fan-out (switcher + mixer + browser relay)
-    output.go                    #   Output: program video/audio → MXL shared memory via sink callbacks
+    reader.go                    #   Reader: videoLoop/audioLoop/dataLoop goroutines, NewDataReader, error recovery, PTS tracking
+    writer.go                    #   Writer: steady-rate ticker video output, wall-clock audio indices, SetDataWriter/WriteDataGrain
+    source.go                    #   Source: MXL flow → quad fan-out (switcher + mixer + browser relay + OnDataGrain)
+    output.go                    #   Output: program video/audio/data → MXL shared memory; StartLifecycle accepts optional data writer
     v210.go                      #   V210↔YUV420p conversion (10-bit 4:2:2 packed ↔ 8-bit 4:2:0 planar)
     demo.go                      #   DemoVideoReader/DemoAudioReader: synthetic V210+sine test patterns
   demo/                          # Simulated camera sources for demo mode
     source.go                    #   StartSources(): N fake cameras at 30fps
     demux.go                     #   Demo stream demuxer
+    stinger.go                   #   GenerateStingerZip(): basic diagonal-wipe stinger PNG sequence
+    stinger_demos.go             #   3 animated stinger clips (whoosh, slam, musical) with synthesized audio
+    stinger_audio.go             #   WAV generation and audio synthesis (whoosh sweep, slam impact, musical sting)
   internal/                      # Shared types
-    types.go                     #   ControlRoomState, SourceInfo, TallyStatus, AudioChannel
+    types.go                     #   ControlRoomState, SourceInfo, AudioChannel, MacroExecutionState, SCTE35State
 ui/                              # SvelteKit frontend (Svelte 5 + TypeScript)
   src/
     lib/
@@ -268,10 +285,10 @@ Dockerfile                       # Multi-stage build (UI → Go → runtime)
 2. **[docs/locking-and-concurrency.md](docs/locking-and-concurrency.md)** — lock inventory, frame flow diagrams, lock ordering rules, deadlock-free guarantees
 3. **[docs/scte35.md](docs/scte35.md)** — SCTE-35 ad insertion feature guide
 
-## Current State (MVP + Production Hardening — Phases 1-23)
+## Current State (MVP + Production Hardening — Phases 1-26)
 
 - **Branch:** `main`
-- **Tests:** ~1469 Go tests + 624 Vitest tests + 47 E2E tests passing with `-race`
+- **Tests:** ~1933 Go tests + 758 Vitest tests + 47 E2E tests passing with `-race`
 - **What works:** Everything from Phases 1-5 + Simple Mode (volunteer-friendly layout), video/audio playback pipeline (MoQ → decoder → canvas), PFL audio decode + metering, FTB reverse toggle (smooth fade-in), recording file rotation (time + size), SRT wired to real zsiec/srtgo (pure Go), ring buffer overflow monitoring with reconnect callback, static file embedding (single binary), Dockerfile (multi-stage), GitHub Actions CI, Makefile with dev/build/docker/test targets, `make demo` with 4 simulated cameras (`--demo` flag)
 - **Phase 6 (Instrumentation):** Prometheus metrics, debug snapshot collector, event log, admin endpoints
 - **Phase 7 (Production Hardening):** Source delay buffer, auth middleware, brickwall limiter, async output adapter, codec stubs, DSK graphics compositor
@@ -294,6 +311,7 @@ Dockerfile                       # Multi-stage build (UI → Go → runtime)
 - **MXL Integration:** Shared-memory media transport for uncompressed V210 video + float32 audio. `mxl/` package with cgo bindings (build tag: `mxl`), flow discovery (NMOS IS-04), V210↔YUV420p conversion, Reader/Writer/Source/Output orchestrators. Triple fan-out: raw YUV to switcher, raw PCM to mixer, H.264/AAC encoded to browser relay. Program output routed back to MXL via sink callbacks. `make mxl-demo` runs GStreamer test sources + Switchframe + UI. Stub implementation for non-MXL builds.
 - **Phase 24 (Low-Latency Control + Raw Monitor):** HTTP/3 control commands via QUIC (replacing TCP :8081 default), MoQ control track wiring (event-driven state push replacing 500ms polling), CORS middleware on ExtraRoutes, cert-hash on admin server for dev bootstrapping, `--http-fallback` opt-in TCP :8081, API base URL routing (`base-url.ts`), mkcert support (`--tls-cert`/`--tls-key`, `make setup-mkcert`), raw YUV420 program monitor (`--raw-program-monitor`, `--raw-monitor-scale`), WebGL YUV→RGB renderer (`yuv-renderer.ts`), `program-raw` MoQ track with 8-byte header + planar YUV, format preset API (`GET/PUT /api/format`), easing curves for transitions, frame rate conversion with MCFI + SIMD SAD kernels (`--frc-quality`)
 - **Phase 25 (SCTE-35 Ad Insertion):** Real-time SCTE-35 splice_insert and time_signal injection into MPEG-TS output. `server/scte35/` package wrapping `Comcast/scte35-go v1.7.1`. Injector with PTS-synchronized timing, auto-return timers, hold/extend break management, splice_null heartbeat. Signal conditioning rules engine (first-match-wins, AND/OR compound conditions, 5 preset templates). File-based rules store at `~/.switchframe/scte35_rules.json`. Pass-through parser with CRC validation and multi-packet reassembly. Async webhook dispatcher. TSMuxer integration with SCTE-35 PID 0x102, PMT registration (stream_type 0x86), CUEI registration descriptor, PSI section framing. Per-destination SCTE-35 enable/disable. Synthetic break state for SRT late-join. 17 REST API endpoints. 5 macro actions (scte35_cue/return/cancel/hold/extend). CLI flags (`--scte35`, `--scte35-pid`, `--scte35-preroll`, `--scte35-heartbeat`, `--scte35-verify`, `--scte35-webhook`). State broadcast via ControlRoomState.scte35. SCTE35Panel.svelte UI (quick actions, advanced cue builder, event log). Keyboard shortcuts (Shift+B/R/H/E). BottomTabs 7th tab (Ctrl+Shift+7).
+- **Phase 26 (SCTE-104, Stinger Audio, Phase Vocoder, MCFI Replay):** SCTE-104 protocol (`server/scte104/`): binary encode/decode, bidirectional SCTE-104↔SCTE-35 translation, SMPTE ST 291 VANC framing. `--scte104` CLI flag wires bidirectional MXL data flow: input (MXL data grain → ParseST291 → Decode → ToCueMessage → InjectCue), output (injector SCTE104Sink → FromCueMessage → Encode → WrapST291 → WriteDataGrain). MXL source spec extended to 3-part `videoUUID:audioUUID:dataUUID`. MXL data flows: `NewDataReader`, `dataLoop`, `SetDataWriter`/`WriteDataGrain`, `OnDataGrain` callback, `StartLifecycle` optional data writer. Stinger audio: `stinger/wav.go` WAV parser (int16 + float32), `AudioMixer.SetStingerAudio()` additive PCM overlay with sample rate/channel validation. 3 demo stingers (whoosh, slam, musical) with synthesized audio. Phase vocoder (`replay/phasevocoder.go`): STFT-based pitch-preserved time-stretching as primary replay audio path (WSOLA fallback). `replay/fft.go` radix-2 FFT, SIMD butterfly kernels (amd64/arm64). MCFI interpolator (`switcher/mcfi_interpolate.go`): implements `replay.FrameInterpolator`, cached motion vectors, `mcfi_warp_fast.go` (16.16 fixed-point row-parallel warp). Macro overhaul: `validate.go` with pre-save validation, `ExecutionState`/`StepState`/`OnProgress` types, execution broadcast via ControlRoomState, dismiss (`DELETE /api/macros/execution`) and cancel (`POST /api/macros/execution/cancel`) endpoints, 35 action types across 10 categories.
 - **What's stubbed:** ISO per-source recording (v2.5), WebGPU dissolve (Canvas 2D fallback works)
 
 ## Key Architecture Decisions
@@ -375,6 +393,13 @@ Dockerfile                       # Multi-stage build (UI → Go → runtime)
 - **Frame rate conversion (FRC):** Optional frame rate conversion with 4 quality levels: `none` (passthrough), `nearest` (nearest-frame), `blend` (alpha blend), `mcfi` (motion-compensated frame interpolation with SIMD SAD kernels in `frcasm/`). Enabled via `--frc-quality` flag. `make demo` defaults to `mcfi`. Works with the frame synchronizer to normalize mixed-rate sources to the pipeline format.
 - **Platform SIMD kernels:** Graphics (alpha blend, chroma key, luma key) and transitions (blend, downsample, scaler, Lanczos) have platform-specific SIMD implementations for amd64 and arm64 with generic Go fallbacks. FRC uses hand-written assembly SAD kernels in `switcher/frcasm/`.
 - **SCTE-35 ad insertion:** `server/scte35/` package wrapping `Comcast/scte35-go v1.7.1`. `Injector` manages active events with PTS-synchronized timing from `Switcher.LastBroadcastVideoPTS()` (atomic load, 90kHz clock). Auto-return via `time.Timer`, hold/extend for break management, splice_null heartbeat goroutine. `RuleEngine` for signal conditioning with first-match-wins evaluation, AND/OR compound conditions, 8 operators (=, !=, >, <, >=, <=, range, contains, matches), destination filtering. `RulesStore` for file-based CRUD at `~/.switchframe/scte35_rules.json` with 5 preset templates. `ParseFromTS()` for pass-through SCTE-35 extraction with CRC validation and multi-packet reassembly. TSMuxer integration: SCTE-35 PID 0x102 with stream_type 0x86, CUEI registration descriptor (format_identifier 0x43554549), PSI section framing (not PES), continuity counter. `WriteSCTE35(data)` queues encoded sections for next TS packet flush. Per-destination `SCTE35Enabled` flag. `SyntheticBreakState()` generates splice_insert for SRT late-join. 17 REST endpoints at `/api/scte35/*`. 5 macro actions (scte35_cue/return/cancel/hold/extend). `WebhookDispatcher` for async HTTP POST notifications. State broadcast via `ControlRoomState.SCTE35`. SCTE35Panel.svelte with three-zone layout (quick actions + advanced cue builder + event log). Keyboard shortcuts: Shift+B (ad break), Shift+R (return), Shift+H (hold), Shift+E (extend).
+
+- **SCTE-104 integration:** `server/scte104/` implements the automation-to-splicer protocol. Bidirectional translation via `ToCueMessage`/`FromCueMessage`. Input: MXL data grain → `ParseST291` (DID=0x41/SDID=0x07) → `Decode` (SOM/MOM parser) → `ToCueMessage` → `injector.InjectCue`. Output: `injector.SetSCTE104Sink` → `FromCueMessage` → `Encode` (always MOM) → `WrapST291` → `mxlOutput.WriteDataGrain`. Enabled via `--scte104` (requires `--scte35`). `SCTE35State.SCTE104Enabled` broadcast in state.
+- **MXL data flow support:** Source spec extended to `videoUUID[:audioUUID[:dataUUID]]`. `NewDataReader` creates discrete data flow readers. `SourceConfig.OnDataGrain` callback for application-level processing. `Writer.SetDataWriter`/`WriteDataGrain` for output. `Output.StartLifecycle` accepts optional data writer.
+- **Stinger audio:** `stinger/wav.go` `ParseWAV()` supports PCM int16 and IEEE float32. `Clip` struct has `Audio`/`AudioSampleRate`/`AudioChannels`. During stinger transitions, `mixer.SetStingerAudio()` additively overlays PCM with sample rate/channel validation and fade-out envelope. Demo loads 3 stingers (whoosh, slam, musical) with synthesized audio.
+- **Phase vocoder time-stretching:** `replay/phasevocoder.go` is the primary slow-motion audio path (WSOLA fallback). Uses STFT with spectral peak locking and COLA-normalized overlap-add. `replay/fft.go` provides radix-2 Cooley-Tukey FFT. SIMD butterfly kernels in `fft_butterfly_amd64.go`/`fft_butterfly_arm64.go`.
+- **MCFI replay interpolator:** `switcher.MCFIState` (in `mcfi_interpolate.go`) implements `replay.FrameInterpolator`. Motion vectors cached per unique frame pair. `mcfi_warp_fast.go` uses 16.16 fixed-point row-parallel warp (~4x speedup). `frc_warp.go` removed.
+- **Macro validation and execution broadcast:** `macro/validate.go` `ValidateSteps()` returns errors (block save) and warnings. `ExecutionState`/`StepState`/`OnProgress` types for real-time step-by-step broadcast. 35 action types across 10 categories. Dismiss (`DELETE /api/macros/execution`) and cancel (`POST /api/macros/execution/cancel`) endpoints. One macro at a time (409 Conflict).
 
 ## Prism Dependency
 
