@@ -266,6 +266,7 @@ Dockerfile                       # Multi-stage build (UI → Go → runtime)
 
 1. **This file** — layout and conventions
 2. **[docs/locking-and-concurrency.md](docs/locking-and-concurrency.md)** — lock inventory, frame flow diagrams, lock ordering rules, deadlock-free guarantees
+3. **[docs/scte35.md](docs/scte35.md)** — SCTE-35 ad insertion feature guide
 
 ## Current State (MVP + Production Hardening — Phases 1-23)
 
