@@ -157,6 +157,13 @@ server/                          # Go module (github.com/zsiec/switchframe/serve
     keyer.go                     #   Chroma/luma key generation in YUV420 domain
     key_processor.go             #   Upstream key chain (per-source, before mix)
     key_processor_bridge.go      #   KeyProcessorBridge: IngestFillYUV + ProcessYUV for pipeline
+  layout/                        # PIP/multi-layout compositor
+    layout.go                    #   Layout types, preset definitions, even-alignment validation
+    compositor.go                #   PIP compositor with frame cache, scaling, border drawing
+    blend.go                     #   YUV420 opaque compositing, border, alpha blend
+    transitions.go               #   PIP transitions (cut, dissolve, fly-in) with slot on/off
+    presets.go                   #   PIP, side-by-side, quad preset factories
+    store.go                     #   File-based layout preset store with CRUD
   preset/                        # Switcher preset save/recall
     store.go                     #   Preset storage (file-based)
     recall.go                    #   Preset recall logic
@@ -236,8 +243,8 @@ ui/                              # SvelteKit frontend (Svelte 5 + TypeScript)
         pfl-toggle.ts            #   PFL toggle utility
         peak-hold.ts             #   Peak hold computation for VU meters
       graphics/                  # Graphics overlay
-        publisher.ts             #   Graphics publisher
-        templates.ts             #   Graphics templates
+        publisher.ts             #   Graphics publisher (OffscreenCanvas rendering + REST upload)
+        templates.ts             #   6 broadcast-quality graphics templates (lower-third, news-lower-third, full-screen, score-bug, network-bug, ticker)
       pipeline/                  # Media pipeline
         manager.ts               #   Pipeline lifecycle manager
       util/                      # Utilities
@@ -278,8 +285,14 @@ ui/                              # SvelteKit frontend (Svelte 5 + TypeScript)
       PresetPanel.svelte         #   Preset save/recall/delete panel
       ServerPipelineOverlay.svelte #  Server pipeline visualization overlay
       SCTE35Panel.svelte          #   SCTE-35 ad insertion panel (quick actions, cue builder, event log)
+      MacroStepEditor.svelte     #   Macro step parameter editors (action-specific fields)
+      LayoutPanel.svelte         #   PIP/multi-layout control panel (preset strip, slot controls)
+      LayoutOverlay.svelte       #   PIP layout drag overlay with amber tally
+      StatsPanel.svelte          #   Debug stats slide-out panel (pipeline, frames, audio)
       BottomTabs.svelte          #   Tabbed bottom panel (Audio/Graphics/Macros/Keys/Replay/Presets/SCTE-35)
       auto-animation.svelte.ts   #   Auto transition animation state
+      auto-animation.test.ts     #   Tests for auto animation
+      macro-actions.ts           #   Macro action metadata, categories, graphics layer constants
     lib/layout/                  # Layout mode management
       preferences.ts             #   URL param + localStorage detection/persistence
       responsive.css             #   Responsive breakpoints + touch support utilities
@@ -301,7 +314,7 @@ Dockerfile                       # Multi-stage build (UI → Go → runtime)
 ## Current State (MVP + Production Hardening — Phases 1-26)
 
 - **Branch:** `main`
-- **Tests:** ~1933 Go tests + 758 Vitest tests + 47 E2E tests passing with `-race`
+- **Tests:** ~2314 Go tests + 825 Vitest tests + 47 E2E tests passing with `-race`
 - **What works:** Everything from Phases 1-5 + Simple Mode (volunteer-friendly layout), video/audio playback pipeline (MoQ → decoder → canvas), PFL audio decode + metering, FTB reverse toggle (smooth fade-in), recording file rotation (time + size), SRT wired to real zsiec/srtgo (pure Go), ring buffer overflow monitoring with reconnect callback, static file embedding (single binary), Dockerfile (multi-stage), GitHub Actions CI, Makefile with dev/build/docker/test targets, `make demo` with 4 simulated cameras (`--demo` flag)
 - **Phase 6 (Instrumentation):** Prometheus metrics, debug snapshot collector, event log, admin endpoints
 - **Phase 7 (Production Hardening):** Source delay buffer, auth middleware, brickwall limiter, async output adapter, codec stubs, DSK graphics compositor
@@ -326,6 +339,8 @@ Dockerfile                       # Multi-stage build (UI → Go → runtime)
 - **Phase 25 (SCTE-35 Ad Insertion):** Real-time SCTE-35 splice_insert and time_signal injection into MPEG-TS output. `server/scte35/` package wrapping `Comcast/scte35-go v1.7.1`. Injector with PTS-synchronized timing, auto-return timers, hold/extend break management, splice_null heartbeat. Signal conditioning rules engine (first-match-wins, AND/OR compound conditions, 5 preset templates). File-based rules store at `~/.switchframe/scte35_rules.json`. Pass-through parser with CRC validation and multi-packet reassembly. Async webhook dispatcher. TSMuxer integration with SCTE-35 PID 0x102, PMT registration (stream_type 0x86), CUEI registration descriptor, PSI section framing. Per-destination SCTE-35 enable/disable. Synthetic break state for SRT late-join. 17 REST API endpoints. 5 macro actions (scte35_cue/return/cancel/hold/extend). CLI flags (`--scte35`, `--scte35-pid`, `--scte35-preroll`, `--scte35-heartbeat`, `--scte35-verify`, `--scte35-webhook`). State broadcast via ControlRoomState.scte35. SCTE35Panel.svelte UI (quick actions, advanced cue builder, event log). Keyboard shortcuts (Shift+B/R/H/E). BottomTabs 7th tab (Ctrl+Shift+7).
 - **Phase 26 (SCTE-104, Stinger Audio, Phase Vocoder, MCFI Replay):** SCTE-104 protocol (`server/scte104/`): binary encode/decode, bidirectional SCTE-104↔SCTE-35 translation, SMPTE ST 291 VANC framing. `--scte104` CLI flag wires bidirectional MXL data flow: input (MXL data grain → ParseST291 → Decode → ToCueMessage → InjectCue), output (injector SCTE104Sink → FromCueMessage → Encode → WrapST291 → WriteDataGrain). MXL source spec extended to 3-part `videoUUID:audioUUID:dataUUID`. MXL data flows: `NewDataReader`, `dataLoop`, `SetDataWriter`/`WriteDataGrain`, `OnDataGrain` callback, `StartLifecycle` optional data writer. Stinger audio: `stinger/wav.go` WAV parser (int16 + float32), `AudioMixer.SetStingerAudio()` additive PCM overlay with sample rate/channel validation. 3 demo stingers (whoosh, slam, musical) with synthesized audio. Phase vocoder (`replay/phasevocoder.go`): STFT-based pitch-preserved time-stretching as primary replay audio path (WSOLA fallback). `replay/fft.go` radix-2 FFT, SIMD butterfly kernels (amd64/arm64). MCFI interpolator (`switcher/mcfi_interpolate.go`): implements `replay.FrameInterpolator`, cached motion vectors, `mcfi_warp_fast.go` (16.16 fixed-point row-parallel warp). Macro overhaul: `validate.go` with pre-save validation, `ExecutionState`/`StepState`/`OnProgress` types, execution broadcast via ControlRoomState, dismiss (`DELETE /api/macros/execution`) and cancel (`POST /api/macros/execution/cancel`) endpoints, 35 action types across 10 categories.
 - **Pipeline Architecture Rework (Phases 0-4, 6):** Replaced inline procedural video processing with explicit `Pipeline.Run()` node chain. `PipelineNode` interface (7 methods) with 4 implementations: `upstreamKeyNode`, `compositorNode`, `rawSinkNode`, `encodeNode`. `FramePool` (mutex-guarded LIFO free list, 32 buffers at 1080p, >99% hit rate) replaces `sync.Pool` for YUV420 buffers. Atomic pipeline swap (`swapPipeline`) for runtime reconfiguration without frame drops — rebuild triggers: SetCompositor, SetKeyBridge, SetRawVideoSink, SetRawMonitorSink, compositor/key state changes, SetPipelineFormat. Pipeline epoch for downstream change detection. Per-node Prometheus histogram (`switchframe_pipeline_node_duration_seconds`). Lip-sync hint (`totalVideoLatency - aacFrameDuration`) in `Pipeline.Snapshot()`. `GOMEMLIMIT=2G`, `runtime.LockOSThread` on video processing goroutine. See [docs/pipeline.md](docs/pipeline.md).
+- **Multi-Layer Graphics Engine (Phases 1-7):** Multi-layer DSK graphics compositor with up to 8 layers. Per-layer: RGBA overlay upload, cut/auto on/off (500ms fade), z-order control, position/size rect, fly-in/fly-out animation (4 directions), slide animation, pulse animation (min/max alpha, speed Hz), transition animation (target alpha/rect, duration, easing). 6 built-in broadcast-quality templates (lower-third, news-lower-third, full-screen-card, score-bug, network-bug, ticker) with canvas-rendered preview. 10 new macro actions for graphics operations. GraphicsPanel UI with per-layer animation config, fly controls, busy-state protection, toast notifications, orphaned state cleanup. `graphicsAnimate()`/`graphicsFlyIn()`/etc in switch-api.ts.
+- **PIP & Multi-Layout (Phase 8):** Layout compositor for picture-in-picture and multi-view compositions. Layout types: PIP, side-by-side, quad split. Per-slot: source assignment, on/off, position/size, crop-to-fill scale mode. PIP transitions: cut, dissolve, fly-in. Auto-dissolve when PIP source matches program. 5 macro actions (layout_preset, layout_slot_on, layout_slot_off, layout_slot_source, layout_clear). File-based layout preset store. 10 REST endpoints. LayoutPanel and LayoutOverlay UI components with amber tally. Fast-control datagrams for smooth PIP drag.
 - **What's stubbed:** ISO per-source recording (v2.5), WebGPU dissolve (Canvas 2D fallback works)
 
 ## Key Architecture Decisions
@@ -415,6 +430,8 @@ Dockerfile                       # Multi-stage build (UI → Go → runtime)
 - **Phase vocoder time-stretching:** `replay/phasevocoder.go` is the primary slow-motion audio path (WSOLA fallback). Uses STFT with spectral peak locking and COLA-normalized overlap-add. `replay/fft.go` provides radix-2 Cooley-Tukey FFT. SIMD butterfly kernels in `fft_butterfly_amd64.go`/`fft_butterfly_arm64.go`.
 - **MCFI replay interpolator:** `switcher.MCFIState` (in `mcfi_interpolate.go`) implements `replay.FrameInterpolator`. Motion vectors cached per unique frame pair. `mcfi_warp_fast.go` uses 16.16 fixed-point row-parallel warp (~4x speedup). `frc_warp.go` removed.
 - **Macro validation and execution broadcast:** `macro/validate.go` `ValidateSteps()` returns errors (block save) and warnings. `ExecutionState`/`StepState`/`OnProgress` types for real-time step-by-step broadcast. 35 action types across 10 categories. Dismiss (`DELETE /api/macros/execution`) and cancel (`POST /api/macros/execution/cancel`) endpoints. One macro at a time (409 Conflict).
+- **Multi-layer graphics compositor:** Up to 8 DSK layers with independent RGBA overlays, z-ordering, position rects, and animation state. Per-layer mutex for concurrent animation goroutines. `AnimationConfig` supports pulse (oscillating alpha) and transition (rect/alpha interpolation with easing) modes. Fly-in/fly-out computes off-screen start/end rects from program dimensions. `buildStateLocked()` serializes all layer state for broadcast. Template names stored per-layer for state persistence.
+- **Layout/PIP compositor:** `layout.Compositor` composites up to 4 PIP slots onto the program frame. Each slot has source assignment, on/off state, position rect, and scale mode (fit/fill). PIP transitions (cut, dissolve, fly-in) animate slot visibility changes. Auto-dissolve triggers when PIP source matches new program source. Layout presets (PIP, side-by-side, quad) stored in file-based JSON store. Integrated into video pipeline as a pipeline node between upstream-key and DSK compositor.
 
 ## Prism Dependency
 
