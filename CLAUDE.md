@@ -31,6 +31,11 @@ server/                          # Go module (github.com/zsiec/switchframe/serve
     admin.go                     #   Admin/debug HTTP endpoints + cert-hash bootstrap
     app_codec.go                 #   Codec factory functions for decoders/encoders
     app_mxl_demo.go              #   MXL demo source orchestration (synthetic V210/PCM)
+    app_fastctrl.go              #   Fast-control datagram handlers (layout + transition)
+  fastctrl/                      # High-frequency datagram control channel
+    dispatcher.go                #   Message type router for WebTransport datagrams
+    layout.go                    #   Layout slot position parser (0x01)
+    transition.go                #   Transition position parser (0x02)
   switcher/                      # Core switching engine
     switcher.go                  #   State machine: Cut(), SetPreview(), frame routing, audio handler
     source_viewer.go             #   Per-source Viewer proxy (atomic.Pointer for lock-free hot path, srcDecoder for always-decode)
@@ -220,6 +225,7 @@ ui/                              # SvelteKit frontend (Svelte 5 + TypeScript)
         connection-manager.ts    #   Connection lifecycle manager
         media-pipeline.ts        #   MoQ → decoder orchestrator (per-source)
         source-errors.svelte.ts  #   Per-source error tracking
+        fast-control.ts          #   WebTransport datagram sender (PIP drag, T-bar)
       video/                     # Video rendering
         dissolve.ts              #   WebGPU dissolve renderer + Canvas 2D fallback
         dissolve-fallback.ts     #   Canvas 2D dissolve/dip rendering
@@ -343,7 +349,8 @@ Dockerfile                       # Multi-stage build (UI → Go → runtime)
 - **Transition engine:** Created per-transition, destroyed on complete/abort. Wall-clock frame pairing with smoothstep easing, output driven by incoming source. Encoder bitrate/fps derived from source stream statistics.
 - **Blend colorspace:** YUV420 (BT.709 domain) matching hardware broadcast mixers (ATEM, Ross). Avoids costly YUV↔RGB round-trip.
 - **Wipe transitions:** 6 directions (h-left, h-right, v-top, v-bottom, box-center-out, box-edges-in) using per-pixel threshold mask with 4px soft edge in YUV420 domain.
-- **T-bar control:** Throttled REST position updates (50ms/20Hz). HTTP/3 multiplexed on shared QUIC connection.
+- **T-bar control:** Throttled REST position updates (50ms/20Hz). HTTP/3 multiplexed on shared QUIC connection. Upgraded to WebTransport datagrams when available (see fast-control datagrams below).
+- **Fast-control datagrams:** WebTransport datagrams for high-frequency control updates (PIP drag, T-bar). Binary wire format: `[type_byte][payload]` (~10 bytes/update). `fastctrl.Dispatcher` routes by message type. Layout handler (0x01) calls `compositor.UpdateSlotRect()` (fast path, no state broadcast). Transition handler (0x02) calls `switcher.SetTransitionPosition()`. On drag release, one REST call confirms authoritative state. Fallback to throttled REST when datagrams unavailable. Prism `OnDatagram` callback in `ServerConfig` (v0.1.2).
 - **Resolution mismatch:** Pure Go bilinear scaler normalizes mismatched sources to program resolution during transitions. No new cgo dependencies.
 - **Browser dissolve:** WebGPU shader + Canvas 2D fallback. Client-side preview only; server produces authoritative output.
 - **Recording format:** MPEG-TS (.ts) -- crash-resilient (no moov atom), same muxer as SRT output.
