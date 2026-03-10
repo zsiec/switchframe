@@ -435,7 +435,7 @@ Dockerfile                       # Multi-stage build (UI → Go → runtime)
 
 ## Prism Dependency
 
-Prism is published as `github.com/zsiec/prism v0.1.1` (includes `ExtraRoutes` field in `ServerConfig`). SRT is `github.com/zsiec/srtgo v0.2.4`. No local `replace` directives — all dependencies resolve from the Go module proxy.
+Prism is published as `github.com/zsiec/prism v0.1.3` (includes `ExtraRoutes`, `OnDatagram`, `BroadcastVideoNoCache`). SRT is `github.com/zsiec/srtgo v0.2.4`. No local `replace` directives — all dependencies resolve from the Go module proxy.
 
 Key Prism interfaces used:
 - `distribution.Viewer` — `ID()`, `SendVideo()`, `SendAudio()`, `SendCaptions()`, `Stats()`
