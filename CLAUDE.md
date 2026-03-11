@@ -119,7 +119,7 @@ server/                          # Go module (github.com/zsiec/switchframe/serve
     blend.go                     #   YUV420 blending (mix, dip, wipe, FTB, stinger)
     color.go                     #   BT.709 YUV420↔RGB colorspace conversion
     codec.go                     #   VideoDecoder/VideoEncoder interfaces + mocks
-    types.go                     #   TransitionType/TransitionState/WipeDirection constants
+    types.go                     #   Type/State/WipeDirection constants
     scaler.go                    #   Pure Go bilinear YUV420 scaler for resolution mismatch
     scaler_lanczos.go            #   Lanczos-3 kernel scaler for broadcast-quality scaling
     easing.go                    #   Transition easing curves (smoothstep, ease-in/out)
@@ -401,7 +401,7 @@ Dockerfile                       # Multi-stage build (UI → Go → runtime)
 - **Shared codec:** `server/codec/` package: FFmpeg libavcodec cgo bindings (encoder + decoder), startup probe auto-detects best encoder (NVENC → VA-API → VideoToolbox → libx264 → OpenH264 fallback). Build tags: `cgo && !noffmpeg` for FFmpeg, `cgo && openh264` for OpenH264. Also provides AVC1↔Annex B NALU helpers used by output muxer.
 - **Simple Mode:** Volunteer-friendly layout with just preview/program + source buttons + CUT/DISSOLVE. Layout mode detected from URL param (`?mode=simple`) > localStorage > default 'traditional'. Auto-persists URL param to localStorage.
 - **Media pipeline:** Per-source MoQTransport → PrismVideoDecoder → VideoRenderBuffer → PrismRenderer (rAF loop). Audio via PrismAudioDecoder with AudioContext for PFL/metering.
-- **FTB reverse:** Smooth fade-in from black using inverted blend position (`1.0 - pos`). New `TransitionFTBReverse` type.
+- **FTB reverse:** Smooth fade-in from black using inverted blend position (`1.0 - pos`). New `transition.FTBReverse` type.
 - **Recording rotation:** Time-based (default 1h) and size-based. Sequential naming `program_YYYYMMDD_HHMMSS_NNN.ts`.
 - **SRT wiring:** Function injection pattern — `srt_wire.go` provides real `srt.Dial()`/`srt.Listen()` wrappers, injected into output.Manager from `main.go`. Uses `zsiec/srtgo` (pure Go, no cgo).
 - **Ring buffer overflow:** `onReconnect(overflowed bool)` callback on SRTCaller. output.Manager logs warning and broadcasts state on overflow.
