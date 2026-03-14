@@ -33,6 +33,7 @@ server/                          # Go module (github.com/zsiec/switchframe/serve
     app_mxl_demo.go              #   MXL demo source orchestration (synthetic V210/PCM)
     app_fastctrl.go              #   Fast-control datagram handlers (layout + transition + graphics)
     app_captions.go              #   Caption manager init, SEI injection, VANC sink wiring
+    app_clips.go                 #   Clip store+manager init, per-player MoQ relay, lifecycle callbacks
   fastctrl/                      # High-frequency datagram control channel
     dispatcher.go                #   Message type router for WebTransport datagrams
     layout.go                    #   Layout slot position parser (0x01)
@@ -60,10 +61,15 @@ server/                          # Go module (github.com/zsiec/switchframe/serve
     frc_me.go                    #   FRC motion estimation (MCFI)
     mcfi_interpolate.go          #   MCFIState: standalone MCFI interpolator (replay FrameInterpolator)
     mcfi_warp_fast.go            #   mcfiInterpolateFast: 16.16 fixed-point row-parallel warp
+    perf.go                      #   PerfSwitcherSample/PerfSourceSample mirror types (for perf/)
     frcasm/                      #   SIMD SAD + downsample kernels (amd64/arm64 assembly)
     types.go                     #   Switcher internal types
   audio/                         # Audio mixing engine
-    mixer.go                     #   Per-channel decode/mix/encode, passthrough optimization, stinger audio overlay
+    mixer.go                     #   Mixer struct, lifecycle (New, Close, SetProgram)
+    mixer_config.go              #   recalcPassthrough() and configuration mutation methods
+    mixer_crossfade.go           #   OnProgramChange, crossfade trigger, AFV state update
+    mixer_ingest.go              #   IngestFrame, per-source audio delay application
+    mixer_mix.go                 #   collectMixCycleLocked: sum accumulation, master gain, metering, encode
     codec.go                     #   Decoder/Encoder interfaces + factory types
     fdk_cgo.go                   #   Centralized cgo CFLAGS/LDFLAGS for fdk-aac
     fdk_decoder.go               #   FDK AAC decoder (direct cgo wrapper)
@@ -77,6 +83,7 @@ server/                          # Go module (github.com/zsiec/switchframe/serve
     normalize.go                 #   Audio level normalization utilities
     delay_buffer.go              #   Per-channel audio delay buffer (lip-sync correction, 0-500ms)
     types.go                     #   Audio channel types and enums
+    perf.go                      #   PerfMixerSample mirror type (avoids circular import with perf/)
     stub_codec.go                #   No-op codec stubs (non-cgo builds)
     vec/                         #   SIMD-accelerated float32 vector ops (separate pkg: cgo + asm can't coexist)
   control/                       # REST API + state broadcast
@@ -99,7 +106,9 @@ server/                          # Go module (github.com/zsiec/switchframe/serve
     errmap.go                    #   Error code mapping utilities
     api_layout.go                #   Layout/PIP REST handlers: GET/PUT layout, slot CRUD, preset CRUD
     api_scte35.go                #   SCTE-35 handlers: cue inject, return, cancel, hold, extend, rules CRUD
+    api_clips.go                 #   Clip CRUD + player slot REST handlers (upload, list, load, play, pause, seek, stop)
     api_captions.go              #   Caption handlers: mode set, text input, state query
+    api_encoder.go               #   GET/PUT /api/encoder: runtime encoder switching, available encoder list
     httperr/                     #   JSON error response helpers (Write, WriteErr)
   scte35/                        # SCTE-35 ad insertion & signal conditioning
     message.go                   #   CueMessage types wrapping Comcast/scte35-go (encode/decode)
@@ -114,7 +123,7 @@ server/                          # Go module (github.com/zsiec/switchframe/serve
     encode.go                    #   Encode(): binary serializer (always MOM format)
     st291.go                     #   ParseST291/WrapST291: SMPTE ST 291 VANC framing (DID=0x41/SDID=0x07)
     translate.go                 #   ToCueMessage/FromCueMessage: bidirectional SCTE-104↔SCTE-35 translation
-  transition/                    # Transition engine
+  transition/                    # Transition engine (SIMD kernels: blend/downsample/scaler per amd64/arm64/generic)
     engine.go                     #   Engine lifecycle (start/ingest/complete/abort)
     blend.go                     #   YUV420 blending (mix, dip, wipe, FTB, stinger)
     color.go                     #   BT.709 YUV420↔RGB colorspace conversion
@@ -127,6 +136,7 @@ server/                          # Go module (github.com/zsiec/switchframe/serve
   output/                        # Recording + SRT output engine
     manager.go                   #   Manager: lifecycle, viewer, fan-out, confidence monitor
     muxer.go                     #   TSMuxer: MPEG-TS muxing (go-astits)
+    cbr_pacer.go                 #   CBRPacer: constant-bitrate TS pacing via null packet insertion
     types.go                     #   Adapter interface, status types
     viewer.go                    #   Viewer (distribution.Viewer on program relay)
     recorder.go                  #   FileRecorder adapter (.ts file, rotation)
@@ -138,19 +148,36 @@ server/                          # Go module (github.com/zsiec/switchframe/serve
     ringbuf.go                   #   Ring buffer for SRT reconnection
     async_adapter.go             #   Async write adapter (non-blocking output)
     destination.go               #   Multi-destination types and lifecycle (DestinationConfig/Status)
+    perf.go                      #   PerfOutputSample mirror type (avoids circular import with perf/)
     scte35_filter.go             #   SCTE-35 packet filter (strips PID for destinations with SCTE-35 disabled)
   stinger/                       # Stinger transition clips
     store.go                     #   Store: load/upload/delete PNG sequences + optional WAV audio,
                                  #     path traversal prevention, maxClips limit, sentinel errors
     wav.go                       #   ParseWAV: WAV file parser (PCM int16 + IEEE float32 support)
+  clip/                          # Media clip storage and playback
+    types.go                     #   ClipSource, ClipInfo, PlayerState, sentinel errors
+    store.go                     #   Clip metadata persistence (JSON), file lifecycle, path traversal prevention
+    manager.go                   #   Manager: 4 player slots, source registration lifecycle, state broadcast
+    player.go                    #   Player: decode → re-encode pipeline, pause/seek/speed/loop/hold-last-frame
+    demux.go                     #   DemuxFile: format-dispatching demuxer (.ts → TS path, .mp4/.mov → MP4 path)
+    demux_mp4.go                 #   MP4 box-tree parser (go-mp4): H.264+AAC extraction with SPS/PPS on keyframes
+    validator.go                 #   Validate, IsAcceptedExtension, NeedsTranscode, CanTranscodeFallback
+  ingest/                        # Streaming MPEG-TS demuxer bridge
+    demuxer.go                   #   StreamDemuxer: reads MPEG-TS from io.Reader, broadcasts to distribution.Relay
+  perf/                          # Live performance sampling and HTTP endpoint
+    sampler.go                   #   Sampler: 60s ring-buffer stats (pipeline/E2E/mix-cycle), WindowStats
+    snapshot.go                  #   BaselineSnapshot: named baseline for delta comparison
+    handler.go                   #   GET /api/perf?baseline=name HTTP handler
+    adapters.go                  #   SwitcherAdapter, MixerAdapter, OutputAdapter (breaks circular imports)
   codec/                         # Video codec infrastructure + NALU/ADTS helpers
     ffmpeg_cgo.go                #   FFmpeg cgo CFLAGS/LDFLAGS (libavcodec/libavutil/libavformat/libswscale/libswresample)
     ffmpeg_encoder.go            #   FFmpegEncoder (x264/NVENC/VA-API/VideoToolbox)
     ffmpeg_decoder.go            #   FFmpegDecoder (H.264 software + HW)
     ffmpeg_probe_file.go         #   avformat-based file probe (codec detection for clip upload)
-    ffmpeg_transcode.go          #   C transcode function + Go wrapper (any format → H.264 TS)
+    ffmpeg_transcode.go          #   C transcode function + Go wrapper (any format → H.264 TS, with progress)
     probe.go                     #   ProbeEncoders() startup auto-detection
     video.go                     #   NewVideoEncoder/NewVideoDecoder unified factories
+    types.go                     #   EncoderInfo struct (name, displayName, isDefault)
     openh264_encoder.go          #   OpenH264 fallback encoder (build tag: openh264)
     openh264_decoder.go          #   OpenH264 fallback decoder (build tag: openh264)
     nalu.go                      #   AVC1↔Annex B conversion
@@ -164,11 +191,15 @@ server/                          # Go module (github.com/zsiec/switchframe/serve
     collector.go                 #   Debug snapshot collector (all subsystems)
     event_log.go                 #   Circular event log for diagnostics
   graphics/                      # DSK graphics overlay + upstream keying
-    blend.go                     #   Alpha blending for overlay compositing
+    blend.go                     #   Alpha blending for overlay compositing (SIMD kernels: amd64/arm64/generic)
     compositor.go                #   DSK compositor (template → overlay → program)
-    keyer.go                     #   Chroma/luma key generation in YUV420 domain
+    keyer.go                     #   Chroma/luma key generation in YUV420 domain (SIMD kernels: amd64/arm64/generic)
     key_processor.go             #   Upstream key chain (per-source, before mix)
     key_processor_bridge.go      #   KeyProcessorBridge: IngestFillYUV + ProcessYUV for pipeline
+    image.go                     #   SetImage/GetImage/DeleteImage: per-layer PNG image storage (decoded to RGBA)
+    text_animation.go            #   TextAnimationEngine: animated text overlays with start/stop per layer
+    ticker.go                    #   TickerEngine: scrolling news-ticker on a graphics layer
+    textrender/                  #   Server-side text rendering to RGBA using embedded Inter font
   layout/                        # PIP/multi-layout compositor
     types.go                     #   Layout types (Slot, BorderConfig), scale modes, even-alignment validation
     compositor.go                #   PIP compositor with frame cache, scaling, border drawing
@@ -201,7 +232,7 @@ server/                          # Go module (github.com/zsiec/switchframe/serve
     fft_butterfly_amd64.go       #   amd64 SIMD butterfly kernel
     fft_butterfly_arm64.go       #   arm64 NEON butterfly kernel
     fft_butterfly_generic.go     #   Generic Go butterfly fallback
-    interpolator.go              #   FrameInterpolator interface + blend + MCFI interpolators
+    interpolator.go              #   FrameInterpolator interface + blend + MCFI + pulldown interpolators
     manager.go                   #   Replay orchestration: mark-in/out, play, stop, per-source buffers
   mxl/                           # MXL shared-memory media transport integration
     types.go                     #   FlowOpener, DiscreteReader/Writer, ContinuousReader/Writer interfaces
@@ -231,6 +262,7 @@ server/                          # Go module (github.com/zsiec/switchframe/serve
     stinger_audio.go             #   WAV generation and audio synthesis (whoosh sweep, slam impact, musical sting)
   internal/                      # Shared types
     types.go                     #   ControlRoomState, SourceInfo, AudioChannel, MacroExecutionState, SCTE35State
+    atomicutil/max.go            #   UpdateMax(): lock-free atomic max update via CAS loop
 ui/                              # SvelteKit frontend (Svelte 5 + TypeScript)
   src/
     lib/
@@ -288,6 +320,10 @@ ui/                              # SvelteKit frontend (Svelte 5 + TypeScript)
       SRTOutputModal.svelte      #   SRT configuration modal
       SimpleMode.svelte          #   Volunteer-friendly layout (CUT/DISSOLVE/FTB + sources + health)
       GraphicsPanel.svelte       #   DSK graphics control panel
+      GraphicsDetail.svelte      #   Per-layer graphics detail/configuration panel
+      GraphicsLayerRail.svelte   #   Graphics layer rail/strip UI
+      GraphicsOverlay.svelte     #   Graphics overlay rendering component
+      ClipsPanel.svelte          #   Clip library, upload, 4-player slot controls + upload progress bar
       Clock.svelte               #   Live clock display
       ConfirmDialog.svelte       #   Confirmation dialog
       ConnectionBanner.svelte    #   Connection status banner
@@ -311,7 +347,7 @@ ui/                              # SvelteKit frontend (Svelte 5 + TypeScript)
       LayoutPanel.svelte         #   PIP/multi-layout control panel (preset strip, slot controls)
       LayoutOverlay.svelte       #   PIP layout drag overlay with amber tally
       StatsPanel.svelte          #   Debug stats slide-out panel (pipeline, frames, audio)
-      BottomTabs.svelte          #   Tabbed bottom panel (Audio/Layout/Graphics/Replay/Keys/Captions/SCTE-35/Macros/Presets)
+      BottomTabs.svelte          #   Tabbed bottom panel (Audio/Layout/Graphics/Clips/Replay/Keys/Captions/SCTE-35/Macros/Presets)
       auto-animation.svelte.ts   #   Auto transition animation state
       auto-animation.test.ts     #   Tests for auto animation
       macro-actions.ts           #   Macro action metadata, categories, graphics layer constants
@@ -341,7 +377,7 @@ Dockerfile                       # Multi-stage build (UI → Go → runtime)
 ## Current State (MVP + Production Hardening — Phases 1-26)
 
 - **Branch:** `main`
-- **Tests:** ~3196 Go tests + 826 Vitest tests + 47 E2E tests passing with `-race`
+- **Tests:** ~3682 Go tests + 888 Vitest tests + 47 E2E tests passing with `-race`
 - **What works:** Everything from Phases 1-5 + Simple Mode (volunteer-friendly layout), video/audio playback pipeline (MoQ → decoder → canvas), PFL audio decode + metering, FTB reverse toggle (smooth fade-in), recording file rotation (time + size), SRT wired to real zsiec/srtgo (pure Go), ring buffer overflow monitoring with reconnect callback, static file embedding (single binary), Dockerfile (multi-stage), GitHub Actions CI, Makefile with dev/build/docker/test targets, `make demo` with 4 simulated cameras (`--demo` flag)
 - **Phase 6 (Instrumentation):** Prometheus metrics, debug snapshot collector, event log, admin endpoints
 - **Phase 7 (Production Hardening):** Source delay buffer, auth middleware, brickwall limiter, async output adapter, codec stubs, DSK graphics compositor
@@ -401,7 +437,9 @@ Dockerfile                       # Multi-stage build (UI → Go → runtime)
 - **Output lifecycle:** output.Manager auto-registers viewer on program relay when first output starts, removes when last stops. Zero CPU when inactive.
 - **SRT reconnection:** Exponential backoff (1s->30s) with 4MB ring buffer. Resume from keyframe if overflow. Overflow count tracked and broadcast in state snapshots, reset on Start().
 - **Shared codec:** `server/codec/` package: FFmpeg libavcodec cgo bindings (encoder + decoder), startup probe auto-detects best encoder (NVENC → VA-API → VideoToolbox → libx264 → OpenH264 fallback). Build tags: `cgo && !noffmpeg` for FFmpeg, `cgo && openh264` for OpenH264. Also provides AVC1↔Annex B NALU helpers used by output muxer. Additional FFmpeg libraries (libavformat, libswscale, libswresample) power multi-format clip upload via transcode-on-ingest.
-- **Clip transcode-on-upload:** Clip uploads accept any format FFmpeg can decode (MKV, WebM, AVI, FLV, MXF, WMV, MPG, OGV, plus non-H.264 codecs like HEVC/VP9 in MP4/MOV). Non-H.264 files are transcoded to H.264+AAC MPEG-TS on ingest via `codec.TranscodeFile()` (C-level avformat demux → avcodec decode → swscale/swresample → avcodec encode → avformat mux TS). Stored clips are always H.264 TS, so the player, demuxer, and all downstream code are unchanged. `clip.NeedsTranscode()` probes the file codec; `clip.CanTranscodeFallback()` provides a second-chance transcode when the Go-native MP4 demuxer can't parse a valid H.264 MP4 variant (fragmented, unusual box layout). Replay export and recording import paths are unchanged (already H.264).
+- **Clip transcode-on-upload:** Clip uploads accept any format FFmpeg can decode (MKV, WebM, AVI, FLV, MXF, WMV, MPG, OGV, plus non-H.264 codecs like HEVC/VP9 in MP4/MOV). Non-H.264 files are transcoded to H.264+AAC MPEG-TS on ingest via `codec.TranscodeFileWithProgress()` (C-level avformat demux → avcodec decode → swscale/swresample → avcodec encode → avformat mux TS, with atomic `int32` progress counter read by Go at 4Hz). Stored clips are always H.264 TS, so the player, demuxer, and all downstream code are unchanged. `clip.NeedsTranscode()` probes the file codec; `clip.CanTranscodeFallback()` provides a second-chance transcode when the Go-native MP4 demuxer can't parse a valid H.264 MP4 variant (fragmented, unusual box layout). Upload progress broadcast via `ControlRoomState.ClipUpload` (stages: uploading → analyzing → transcoding → validating). Client uses XHR `upload.onprogress` for byte-level tracking; server stages push via MoQ control track. Concurrent uploads rejected with 409. Replay export and recording import paths are unchanged (already H.264).
+- **Clip playback:** `server/clip/` package: 4 player slots, each with pause/seek/variable-speed (0.25×–2.0×)/hold-last-frame/loop. `Player` decodes clip (TS or MP4), re-encodes for consistent SPS/PPS, paces output at source FPS. Each player slot gets a dedicated MoQ relay (`"clip-player-N"`). `Manager` orchestrates slot lifecycle and broadcasts `ClipPlayerState` array in `ControlRoomState`. `ClipsPanel.svelte` UI with library (uploaded/replay/recordings), drag-to-load, and per-slot transport controls.
+- **Performance sampling:** `server/perf/` package: 60-second sliding window sampler collecting pipeline latency, E2E latency, and mix cycle stats. `WindowStats` (min/max/mean/p95). `GET /api/perf?baseline=name` for delta comparison. Adapter types (`SwitcherAdapter`, `MixerAdapter`, `OutputAdapter`) break circular imports with domain packages.
 - **Simple Mode:** Volunteer-friendly layout with just preview/program + source buttons + CUT/DISSOLVE. Layout mode detected from URL param (`?mode=simple`) > localStorage > default 'traditional'. Auto-persists URL param to localStorage.
 - **Media pipeline:** Per-source MoQTransport → PrismVideoDecoder → VideoRenderBuffer → PrismRenderer (rAF loop). Audio via PrismAudioDecoder with AudioContext for PFL/metering.
 - **FTB reverse:** Smooth fade-in from black using inverted blend position (`1.0 - pos`). New `transition.FTBReverse` type.
@@ -460,13 +498,15 @@ Dockerfile                       # Multi-stage build (UI → Go → runtime)
 - **Phase vocoder time-stretching:** `replay/phasevocoder.go` is the primary slow-motion audio path (WSOLA fallback). Uses STFT with spectral peak locking and COLA-normalized overlap-add. `replay/fft.go` provides radix-2 Cooley-Tukey FFT. SIMD butterfly kernels in `fft_butterfly_amd64.go`/`fft_butterfly_arm64.go`.
 - **MCFI replay interpolator:** `switcher.MCFIState` (in `mcfi_interpolate.go`) implements `replay.FrameInterpolator`. Motion vectors cached per unique frame pair. `mcfi_warp_fast.go` uses 16.16 fixed-point row-parallel warp (~4x speedup). `frc_warp.go` removed.
 - **Macro validation and execution broadcast:** `macro/validate.go` `ValidateSteps()` returns errors (block save) and warnings. `ExecutionState`/`StepState`/`OnProgress` types for real-time step-by-step broadcast. 60 action types across 11 categories. Dismiss (`DELETE /api/macros/execution`) and cancel (`POST /api/macros/execution/cancel`) endpoints. One macro at a time (409 Conflict).
-- **Multi-layer graphics compositor:** Up to 8 DSK layers with independent RGBA overlays, z-ordering, position rects, and animation state. Per-layer mutex for concurrent animation goroutines. `AnimationConfig` supports pulse (oscillating alpha) and transition (rect/alpha interpolation with easing) modes. Fly-in/fly-out computes off-screen start/end rects from program dimensions. `buildStateLocked()` serializes all layer state for broadcast. Template names stored per-layer for state persistence.
+- **Multi-layer graphics compositor:** Up to 8 DSK layers with independent RGBA overlays, z-ordering, position rects, and animation state. Per-layer mutex for concurrent animation goroutines. `AnimationConfig` supports pulse (oscillating alpha) and transition (rect/alpha interpolation with easing) modes. Fly-in/fly-out computes off-screen start/end rects from program dimensions. `buildStateLocked()` serializes all layer state for broadcast. Template names stored per-layer for state persistence. Server-side text rendering via `graphics/textrender/` with embedded Inter font (`golang.org/x/image/font/opentype`). `TextAnimationEngine` for animated text overlays. `TickerEngine` for scrolling news-ticker on a graphics layer. Per-layer `SetImage`/`GetImage`/`DeleteImage` for PNG storage.
+- **CBR pacing:** `output.CBRPacer` generates MPEG-TS null packets (PID 0x1FFF) for constant-bitrate output. `ComputeMuxrate()` calculates muxrate from video+audio bitrates with 12% overhead.
+- **Runtime encoder switching:** `GET/PUT /api/encoder` allows changing the video encoder at runtime (NVENC, VA-API, VideoToolbox, libx264). Returns available encoders with `EncoderInfo` metadata.
 - **Layout/PIP compositor:** `layout.Compositor` composites up to 4 PIP slots onto the program frame. Each slot has source assignment, on/off state, position rect, and scale mode (fit/fill). PIP transitions (cut, dissolve, fly-in) animate slot visibility changes. Auto-dissolve triggers when PIP source matches new program source. Layout presets (PIP, side-by-side, quad) stored in file-based JSON store. Integrated into video pipeline as a pipeline node between upstream-key and DSK compositor.
 - **Closed captions:** `caption.Manager` state machine with 3 modes: `off` (no captions), `passthrough` (re-encode source captions from SEI NALUs), `author` (live text input via REST). CEA-608 encoder produces control codes + character pairs. Output path: Manager provides per-frame `CaptionPair` to output; SEI injection wraps pairs into `user_data_registered_itu_t_t35` NALUs before H.264 encode. MXL output path: `vanc.go` generates SMPTE ST 334 / CDP packets written as VANC data grains. Per-source `HasCaptions` detection populates `SourceInfo` in state broadcast. Enabled via `--captions` CLI flag.
 
 ## Prism Dependency
 
-Prism is published as `github.com/zsiec/prism v0.1.3` (includes `ExtraRoutes`, `OnDatagram`, `BroadcastVideoNoCache`). SRT is `github.com/zsiec/srtgo v0.2.4`. No local `replace` directives — all dependencies resolve from the Go module proxy.
+Prism is published as `github.com/zsiec/prism v0.1.5` (includes `ExtraRoutes`, `OnDatagram`, `BroadcastVideoNoCache`). SRT is `github.com/zsiec/srtgo v0.2.4`. No local `replace` directives — all dependencies resolve from the Go module proxy.
 
 Key Prism interfaces used:
 - `distribution.Viewer` — `ID()`, `SendVideo()`, `SendAudio()`, `SendCaptions()`, `Stats()`
