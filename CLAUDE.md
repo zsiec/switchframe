@@ -144,9 +144,11 @@ server/                          # Go module (github.com/zsiec/switchframe/serve
                                  #     path traversal prevention, maxClips limit, sentinel errors
     wav.go                       #   ParseWAV: WAV file parser (PCM int16 + IEEE float32 support)
   codec/                         # Video codec infrastructure + NALU/ADTS helpers
-    ffmpeg_cgo.go                #   FFmpeg cgo CFLAGS/LDFLAGS (libavcodec/libavutil)
+    ffmpeg_cgo.go                #   FFmpeg cgo CFLAGS/LDFLAGS (libavcodec/libavutil/libavformat/libswscale/libswresample)
     ffmpeg_encoder.go            #   FFmpegEncoder (x264/NVENC/VA-API/VideoToolbox)
     ffmpeg_decoder.go            #   FFmpegDecoder (H.264 software + HW)
+    ffmpeg_probe_file.go         #   avformat-based file probe (codec detection for clip upload)
+    ffmpeg_transcode.go          #   C transcode function + Go wrapper (any format → H.264 TS)
     probe.go                     #   ProbeEncoders() startup auto-detection
     video.go                     #   NewVideoEncoder/NewVideoDecoder unified factories
     openh264_encoder.go          #   OpenH264 fallback encoder (build tag: openh264)
@@ -398,7 +400,8 @@ Dockerfile                       # Multi-stage build (UI → Go → runtime)
 - **SRT modes:** Both caller (push to platform) and listener (accept N pulls, max 8). srtgo is pure Go (no cgo).
 - **Output lifecycle:** output.Manager auto-registers viewer on program relay when first output starts, removes when last stops. Zero CPU when inactive.
 - **SRT reconnection:** Exponential backoff (1s->30s) with 4MB ring buffer. Resume from keyframe if overflow. Overflow count tracked and broadcast in state snapshots, reset on Start().
-- **Shared codec:** `server/codec/` package: FFmpeg libavcodec cgo bindings (encoder + decoder), startup probe auto-detects best encoder (NVENC → VA-API → VideoToolbox → libx264 → OpenH264 fallback). Build tags: `cgo && !noffmpeg` for FFmpeg, `cgo && openh264` for OpenH264. Also provides AVC1↔Annex B NALU helpers used by output muxer.
+- **Shared codec:** `server/codec/` package: FFmpeg libavcodec cgo bindings (encoder + decoder), startup probe auto-detects best encoder (NVENC → VA-API → VideoToolbox → libx264 → OpenH264 fallback). Build tags: `cgo && !noffmpeg` for FFmpeg, `cgo && openh264` for OpenH264. Also provides AVC1↔Annex B NALU helpers used by output muxer. Additional FFmpeg libraries (libavformat, libswscale, libswresample) power multi-format clip upload via transcode-on-ingest.
+- **Clip transcode-on-upload:** Clip uploads accept any format FFmpeg can decode (MKV, WebM, AVI, FLV, MXF, WMV, MPG, OGV, plus non-H.264 codecs like HEVC/VP9 in MP4/MOV). Non-H.264 files are transcoded to H.264+AAC MPEG-TS on ingest via `codec.TranscodeFile()` (C-level avformat demux → avcodec decode → swscale/swresample → avcodec encode → avformat mux TS). Stored clips are always H.264 TS, so the player, demuxer, and all downstream code are unchanged. `clip.NeedsTranscode()` probes the file codec; `clip.CanTranscodeFallback()` provides a second-chance transcode when the Go-native MP4 demuxer can't parse a valid H.264 MP4 variant (fragmented, unusual box layout). Replay export and recording import paths are unchanged (already H.264).
 - **Simple Mode:** Volunteer-friendly layout with just preview/program + source buttons + CUT/DISSOLVE. Layout mode detected from URL param (`?mode=simple`) > localStorage > default 'traditional'. Auto-persists URL param to localStorage.
 - **Media pipeline:** Per-source MoQTransport → PrismVideoDecoder → VideoRenderBuffer → PrismRenderer (rAF loop). Audio via PrismAudioDecoder with AudioContext for PFL/metering.
 - **FTB reverse:** Smooth fade-in from black using inverted blend position (`1.0 - pos`). New `transition.FTBReverse` type.
