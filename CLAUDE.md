@@ -35,6 +35,7 @@ server/                          # Go module (github.com/zsiec/switchframe/serve
     app_captions.go              #   Caption manager init, SEI injection, VANC sink wiring
     app_clips.go                 #   Clip store+manager init, per-player MoQ relay, lifecycle callbacks
     app_srt.go                   #   SRT initialization, source wiring, srtManagerAdapter
+    app_comms.go                 #   Comms manager init, WebTransport bidi stream handler
   fastctrl/                      # High-frequency datagram control channel
     dispatcher.go                #   Message type router for WebTransport datagrams
     layout.go                    #   Layout slot position parser (0x01)
@@ -69,8 +70,10 @@ server/                          # Go module (github.com/zsiec/switchframe/serve
     mixer.go                     #   Mixer struct, lifecycle (New, Close, SetProgram)
     mixer_config.go              #   recalcPassthrough() and configuration mutation methods
     mixer_crossfade.go           #   OnProgramChange, crossfade trigger, AFV state update
-    mixer_ingest.go              #   IngestFrame, per-source audio delay application
-    mixer_mix.go                 #   collectMixCycleLocked: sum accumulation, master gain, metering, encode
+    mixer_ingest.go              #   IngestFrame/IngestPCM: decode + process → ring buffer push
+    mixer_mix.go                 #   tick(): read ring buffers, sum, master gain, LUFS, limiter, encode
+    mixer_ticker.go              #   outputTicker: clock-driven audio output loop (~21.3ms cadence)
+    ringbuf.go                   #   PCMRingBuffer: sample-level circular buffer for clock-driven output
     codec.go                     #   Decoder/Encoder interfaces + factory types
     fdk_cgo.go                   #   Centralized cgo CFLAGS/LDFLAGS for fdk-aac
     fdk_decoder.go               #   FDK AAC decoder (direct cgo wrapper)
@@ -100,6 +103,7 @@ server/                          # Go module (github.com/zsiec/switchframe/serve
     api_replay.go                #   Replay handlers: mark-in/out, play, stop, status, sources
     api_keying.go                #   Upstream key handlers: set/get/delete source key
     api_operator.go              #   Operator management HTTP handlers (register, lock, heartbeat)
+    api_comms.go                 #   Comms REST API handlers (join/leave/mute/status)
     state.go                     #   StatePublisher (JSON serialize -> callback)
     auth.go                      #   API key authentication
     cors.go                      #   CORS middleware for cross-origin API access
@@ -268,6 +272,13 @@ server/                          # Go module (github.com/zsiec/switchframe/serve
     sei.go                       #   H.264 SEI NALU injection (pic_timing + user_data_registered)
     vanc.go                      #   SMPTE ST 334 / CDP output for MXL VANC data grains
     types.go                     #   Mode enum, CaptionPair, state types
+  comms/                         # Operator voice communications
+    types.go                     #   Constants, wire protocol message types, state aliases
+    manager.go                   #   Manager: participant lifecycle, mix loop, encoded output distribution
+    mixer.go                     #   N-1 PCM mixer (each participant hears all others, not self)
+    participant.go               #   Per-participant Opus encode/decode, VAD, PCM buffer queue
+    opus_cgo.go                  #   Opus codec cgo bindings (libopus)
+    opus_stub.go                 #   No-op Opus stubs (non-cgo builds)
   demo/                          # Simulated camera sources for demo mode
     source.go                    #   StartSources(): N fake cameras at 30fps
     demux.go                     #   Demo stream demuxer
@@ -309,6 +320,7 @@ ui/                              # SvelteKit frontend (Svelte 5 + TypeScript)
         pfl.ts                   #   PFL manager (per-source solo monitoring)
         pfl-toggle.ts            #   PFL toggle utility
         peak-hold.ts             #   Peak hold computation for VU meters
+        comms.ts                 #   CommsAudioManager: WebTransport bidi stream + Opus encode/decode
       graphics/                  # Graphics overlay
         publisher.ts             #   Graphics publisher (OffscreenCanvas rendering + REST upload)
         templates.ts             #   6 broadcast-quality graphics templates (lower-third, news-lower-third, full-screen, score-bug, network-bug, ticker)
@@ -340,6 +352,7 @@ ui/                              # SvelteKit frontend (Svelte 5 + TypeScript)
       GraphicsOverlay.svelte     #   Graphics overlay rendering component
       ClipsPanel.svelte          #   Clip library, upload, 4-player slot controls + upload progress bar
       Clock.svelte               #   Live clock display
+      CommsBar.svelte            #   Comms UI: join/leave, mute toggle, volume slider, participant list
       ConfirmDialog.svelte       #   Confirmation dialog
       ConnectionBanner.svelte    #   Connection status banner
       ConnectionStatus.svelte    #   Connection status indicator
@@ -392,7 +405,7 @@ Dockerfile                       # Multi-stage build (UI → Go → runtime)
 ## Current State (MVP + Production Hardening — Phases 1-27)
 
 - **Branch:** `main`
-- **Tests:** ~3870 Go tests + 881 Vitest tests + 47 E2E tests passing with `-race`
+- **Tests:** ~4330 Go tests + 1044 Vitest tests + 47 E2E tests passing with `-race`
 - **What works:** Everything from Phases 1-5 + Simple Mode (volunteer-friendly layout), video/audio playback pipeline (MoQ → decoder → canvas), PFL audio decode + metering, FTB reverse toggle (smooth fade-in), recording file rotation (time + size), SRT wired to real zsiec/srtgo (pure Go), ring buffer overflow monitoring with reconnect callback, static file embedding (single binary), Dockerfile (multi-stage), GitHub Actions CI, Makefile with dev/build/docker/test targets, `make demo` with 4 simulated cameras (`--demo` flag)
 - **Phase 6 (Instrumentation):** Prometheus metrics, debug snapshot collector, event log, admin endpoints
 - **Phase 7 (Production Hardening):** Source delay buffer, auth middleware, brickwall limiter, async output adapter, codec stubs, DSK graphics compositor
