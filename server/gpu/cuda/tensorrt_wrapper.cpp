@@ -12,6 +12,7 @@
 #include <vector>
 #include <cstring>
 #include <cstdio>
+#include <cstdarg>
 
 // Thread-local error message buffer.
 static thread_local char trt_error_buf[1024] = {0};
@@ -44,7 +45,7 @@ private:
     }
 };
 
-static TRTLogger& getLogger() {
+static TRTLogger& getTRTLogger() {
     static TRTLogger logger;
     return logger;
 }
@@ -73,24 +74,22 @@ extern "C" {
 int trt_build_engine(const char* onnxPath, const char* planPath,
                      int maxBatch, int useFP16, int useINT8) {
     auto builder = std::unique_ptr<nvinfer1::IBuilder>(
-        nvinfer1::createInferBuilder(getLogger()));
+        nvinfer1::createInferBuilder(getTRTLogger()));
     if (!builder) {
         set_error("createInferBuilder failed");
         return -1;
     }
 
-    // Explicit batch flag (required for TensorRT 10+).
-    const uint32_t explicitBatch = 1U << static_cast<uint32_t>(
-        nvinfer1::NetworkDefinitionCreationFlag::kEXPLICIT_BATCH);
+    // TensorRT 10+: createNetworkV2(0) — explicit batch is the only mode.
     auto network = std::unique_ptr<nvinfer1::INetworkDefinition>(
-        builder->createNetworkV2(explicitBatch));
+        builder->createNetworkV2(0));
     if (!network) {
         set_error("createNetworkV2 failed");
         return -1;
     }
 
     auto parser = std::unique_ptr<nvonnxparser::IParser>(
-        nvonnxparser::createParser(*network, getLogger()));
+        nvonnxparser::createParser(*network, getTRTLogger()));
     if (!parser) {
         set_error("createParser failed");
         return -1;
@@ -191,7 +190,7 @@ void* trt_load_engine(const char* planPath) {
     }
 
     auto wrapper = new TRTEngineWrapper();
-    wrapper->runtime.reset(nvinfer1::createInferRuntime(getLogger()));
+    wrapper->runtime.reset(nvinfer1::createInferRuntime(getTRTLogger()));
     if (!wrapper->runtime) {
         set_error("createInferRuntime failed");
         delete wrapper;
