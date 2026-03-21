@@ -426,3 +426,8 @@ func FreeRGBBuffer(buf unsafe.Pointer) {}
 func DownloadRGBBuffer(dst []float32, devPtr unsafe.Pointer, outW, outH int) error {
 	return ErrGPUNotAvailable
 }
+
+// MaskFloatToU8Upscale returns ErrGPUNotAvailable on non-CUDA builds.
+func MaskFloatToU8Upscale(dstPtr unsafe.Pointer, dstW, dstH int, srcPtr unsafe.Pointer, srcW, srcH int, stream uintptr) error {
+	return ErrGPUNotAvailable
+}

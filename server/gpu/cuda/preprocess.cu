@@ -125,4 +125,53 @@ cudaError_t nv12_to_rgb_nhwc(
         rgbOut, nv12, srcW, srcH, srcPitch, outW, outH);
     return cudaGetLastError();
 }
+// Convert float32 [srcH, srcW, 1] mask to uint8 and bilinear upscale to target resolution.
+// Each thread computes one output pixel by sampling the float source mask with bilinear
+// interpolation, clamping to [0,1], and scaling to [0,255].
+__global__ void mask_float_to_u8_scale_kernel(
+    uint8_t* __restrict__ dst, int dstW, int dstH,
+    const float* __restrict__ src, int srcW, int srcH)
+{
+    int ox = blockIdx.x * blockDim.x + threadIdx.x;
+    int oy = blockIdx.y * blockDim.y + threadIdx.y;
+    if (ox >= dstW || oy >= dstH) return;
+
+    // Map output pixel to source coordinates
+    float sx = (dstW > 1) ? (float)ox * (float)(srcW - 1) / (float)(dstW - 1) : 0.0f;
+    float sy = (dstH > 1) ? (float)oy * (float)(srcH - 1) / (float)(dstH - 1) : 0.0f;
+
+    // Bilinear interpolation
+    int ix = (int)sx;
+    int iy = (int)sy;
+    float fx = sx - ix;
+    float fy = sy - iy;
+    int ix1 = min(ix + 1, srcW - 1);
+    int iy1 = min(iy + 1, srcH - 1);
+
+    float v00 = src[iy  * srcW + ix];
+    float v10 = src[iy  * srcW + ix1];
+    float v01 = src[iy1 * srcW + ix];
+    float v11 = src[iy1 * srcW + ix1];
+
+    float val = v00 * (1.0f - fx) * (1.0f - fy)
+              + v10 * fx * (1.0f - fy)
+              + v01 * (1.0f - fx) * fy
+              + v11 * fx * fy;
+
+    // Clamp to [0, 1] and scale to [0, 255]
+    val = fminf(fmaxf(val, 0.0f), 1.0f);
+    dst[oy * dstW + ox] = (uint8_t)(val * 255.0f + 0.5f);
+}
+
+cudaError_t mask_to_u8_upscale(
+    uint8_t* dst, int dstW, int dstH,
+    const float* src, int srcW, int srcH,
+    cudaStream_t stream)
+{
+    dim3 block(16, 16);
+    dim3 grid((dstW + block.x - 1) / block.x, (dstH + block.y - 1) / block.y);
+    mask_float_to_u8_scale_kernel<<<grid, block, 0, stream>>>(
+        dst, dstW, dstH, src, srcW, srcH);
+    return cudaGetLastError();
+}
 } // extern "C"

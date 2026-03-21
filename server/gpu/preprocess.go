@@ -19,6 +19,10 @@ cudaError_t nv12_to_rgb_nhwc(
     int srcW, int srcH, int srcPitch,
     int outW, int outH,
     cudaStream_t stream);
+cudaError_t mask_to_u8_upscale(
+    uint8_t* dst, int dstW, int dstH,
+    const float* src, int srcW, int srcH,
+    cudaStream_t stream);
 */
 import "C"
 
@@ -106,6 +110,33 @@ func FreeRGBBuffer(buf unsafe.Pointer) {
 	if buf != nil {
 		C.cudaFree(buf)
 	}
+}
+
+// MaskFloatToU8Upscale converts a float32 segmentation mask on the GPU to uint8
+// and bilinear-upscales it from (srcW, srcH) to (dstW, dstH).
+//
+// srcPtr must point to srcW*srcH float32 elements (model output mask, values 0-1).
+// dstPtr must point to dstW*dstH uint8 elements (pre-allocated output buffer).
+// The stream parameter specifies which CUDA stream to run on.
+func MaskFloatToU8Upscale(dstPtr unsafe.Pointer, dstW, dstH int, srcPtr unsafe.Pointer, srcW, srcH int, stream C.cudaStream_t) error {
+	if dstPtr == nil {
+		return fmt.Errorf("gpu: MaskFloatToU8Upscale: dstPtr is nil")
+	}
+	if srcPtr == nil {
+		return fmt.Errorf("gpu: MaskFloatToU8Upscale: srcPtr is nil")
+	}
+
+	rc := C.mask_to_u8_upscale(
+		(*C.uint8_t)(dstPtr),
+		C.int(dstW), C.int(dstH),
+		(*C.float)(srcPtr),
+		C.int(srcW), C.int(srcH),
+		stream,
+	)
+	if rc != C.cudaSuccess {
+		return fmt.Errorf("gpu: MaskFloatToU8Upscale: kernel failed: %d", rc)
+	}
+	return nil
 }
 
 // DownloadRGBBuffer copies a float32 CHW device buffer to a Go slice.

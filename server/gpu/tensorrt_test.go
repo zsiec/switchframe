@@ -47,3 +47,37 @@ func TestTRTEngineOptsDefaults(t *testing.T) {
 	assert.False(t, opts.UseINT8)
 	assert.Empty(t, opts.PlanCachePath)
 }
+
+func TestSegmentationSessionStub(t *testing.T) {
+	sess, err := NewSegmentationSession(nil, nil, 640, 480)
+	require.ErrorIs(t, err, ErrTensorRTNotAvailable)
+	assert.Nil(t, sess)
+
+	// Close on zero-value should not panic.
+	var s SegmentationSession
+	s.Close()
+
+	// Segment on zero-value should return error.
+	_, err = s.Segment(nil)
+	require.ErrorIs(t, err, ErrTensorRTNotAvailable)
+}
+
+func TestSegmentationManagerStub(t *testing.T) {
+	mgr, err := NewSegmentationManager(nil, "/some/path")
+	require.ErrorIs(t, err, ErrTensorRTNotAvailable)
+	assert.Nil(t, mgr)
+
+	// Methods on zero-value should not panic.
+	var m SegmentationManager
+	err = m.EnableSource("test", 640, 480)
+	require.ErrorIs(t, err, ErrTensorRTNotAvailable)
+
+	m.DisableSource("test")
+
+	_, err = m.Segment("test", nil)
+	require.ErrorIs(t, err, ErrTensorRTNotAvailable)
+
+	assert.False(t, m.IsEnabled("test"))
+
+	m.Close()
+}
