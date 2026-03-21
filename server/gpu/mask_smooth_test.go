@@ -117,17 +117,25 @@ func TestMaskErode3x3(t *testing.T) {
 }
 
 func TestMaskEMANilArgs(t *testing.T) {
-	err := MaskEMA(nil, nil, nil, 0.5, 100, 0)
+	ctx, err := NewContext()
+	require.NoError(t, err)
+	defer ctx.Close()
+
+	err = MaskEMA(nil, nil, nil, 0.5, 100, ctx.Stream())
 	require.Error(t, err)
 
-	err = MaskEMA(unsafe.Pointer(uintptr(1)), nil, nil, 0.5, 100, 0)
+	err = MaskEMA(unsafe.Pointer(uintptr(1)), nil, nil, 0.5, 100, ctx.Stream())
 	require.Error(t, err)
 }
 
 func TestMaskErode3x3NilArgs(t *testing.T) {
-	err := MaskErode3x3(nil, nil, 10, 10, 0)
+	ctx, err := NewContext()
+	require.NoError(t, err)
+	defer ctx.Close()
+
+	err = MaskErode3x3(nil, nil, 10, 10, ctx.Stream())
 	require.Error(t, err)
 
-	err = MaskErode3x3(nil, nil, 0, 0, 0)
+	err = MaskErode3x3(nil, nil, 0, 0, ctx.Stream())
 	require.Error(t, err)
 }
