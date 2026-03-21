@@ -97,11 +97,17 @@ func (b *KeyProcessorBridge) RemoveFillSource(source string) {
 }
 
 // HasEnabledKeysWithFills returns true if there are enabled keys AND cached
-// fill frames. Used by the pipeline coordinator to decide whether to enter
+// fill frames (or AI keys which use the source itself as fill).
+// Used by the pipeline coordinator to decide whether to enter
 // the slow decode/process/encode path.
 func (b *KeyProcessorBridge) HasEnabledKeysWithFills() bool {
 	if !b.kp.HasEnabledKeys() {
 		return false
+	}
+	// AI keys don't need explicit fills — the source's own frame is the fill.
+	// Check if any enabled key is an AI key.
+	if b.kp.hasEnabledAIKeys() {
+		return true
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -125,7 +131,10 @@ func (b *KeyProcessorBridge) ProcessYUV(yuv []byte, width, height int) []byte {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	if len(b.fills) == 0 {
+	// AI keys don't require fills — the source's own frame arrives via IngestFillYUV
+	// like other key types, but we allow processing to proceed even with no fills
+	// cached yet (Process will skip sources with missing fills gracefully).
+	if len(b.fills) == 0 && !b.kp.hasEnabledAIKeys() {
 		return yuv
 	}
 

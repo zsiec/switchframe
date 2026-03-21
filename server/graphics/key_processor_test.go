@@ -454,3 +454,229 @@ func TestKeyProcessor_OddDimensionsReturnsUnmodified(t *testing.T) {
 	result = kp.Process(bg, map[string][]byte{"cam1": bg}, 3, 3)
 	require.Equal(t, original, result, "both odd should return bg unmodified")
 }
+
+func TestKeyTypeAI(t *testing.T) {
+	t.Parallel()
+
+	kp := NewKeyProcessor()
+	w, h := 8, 8
+	ySize := w * h
+	uvSize := (w / 2) * (h / 2)
+	frameSize := ySize + 2*uvSize
+
+	kp.SetKey("cam1", KeyConfig{
+		Type:    KeyTypeAI,
+		Enabled: true,
+	})
+
+	// Build an AI mask: top half opaque (255), bottom half transparent (0).
+	mask := make([]byte, ySize)
+	for y := 0; y < h/2; y++ {
+		for x := 0; x < w; x++ {
+			mask[y*w+x] = 255
+		}
+	}
+	// Bottom half stays 0 (zero-initialized).
+	kp.SetAIMask("cam1", mask)
+
+	// Fill: Y=200, Cb=100, Cr=150
+	fill := make([]byte, frameSize)
+	for i := 0; i < ySize; i++ {
+		fill[i] = 200
+	}
+	for i := 0; i < uvSize; i++ {
+		fill[ySize+i] = 100
+		fill[ySize+uvSize+i] = 150
+	}
+
+	// Background: Y=50, Cb=128, Cr=128
+	bg := make([]byte, frameSize)
+	for i := 0; i < ySize; i++ {
+		bg[i] = 50
+	}
+	for i := 0; i < uvSize; i++ {
+		bg[ySize+i] = 128
+		bg[ySize+uvSize+i] = 128
+	}
+
+	result := kp.Process(bg, map[string][]byte{"cam1": fill}, w, h)
+
+	// Top half (opaque mask=255): should be fill values (Y=200)
+	for y := 0; y < h/2; y++ {
+		for x := 0; x < w; x++ {
+			require.Equal(t, byte(200), result[y*w+x],
+				"top half Y[%d,%d] should be fill (200)", x, y)
+		}
+	}
+
+	// Bottom half (transparent mask=0): should be background values (Y=50)
+	for y := h / 2; y < h; y++ {
+		for x := 0; x < w; x++ {
+			require.Equal(t, byte(50), result[y*w+x],
+				"bottom half Y[%d,%d] should be bg (50)", x, y)
+		}
+	}
+
+	// Chroma: top half should be fill Cb/Cr, bottom half should be bg Cb/Cr.
+	// Chroma is downsampled 2x2, so top 2 chroma rows map to top 4 luma rows (all opaque).
+	chromaW := w / 2
+	chromaH := h / 2
+	for cy := 0; cy < chromaH/2; cy++ {
+		for cx := 0; cx < chromaW; cx++ {
+			idx := cy*chromaW + cx
+			require.Equal(t, byte(100), result[ySize+idx],
+				"top chroma Cb[%d,%d] should be fill (100)", cx, cy)
+			require.Equal(t, byte(150), result[ySize+uvSize+idx],
+				"top chroma Cr[%d,%d] should be fill (150)", cx, cy)
+		}
+	}
+	for cy := chromaH / 2; cy < chromaH; cy++ {
+		for cx := 0; cx < chromaW; cx++ {
+			idx := cy*chromaW + cx
+			require.Equal(t, byte(128), result[ySize+idx],
+				"bottom chroma Cb[%d,%d] should be bg (128)", cx, cy)
+			require.Equal(t, byte(128), result[ySize+uvSize+idx],
+				"bottom chroma Cr[%d,%d] should be bg (128)", cx, cy)
+		}
+	}
+}
+
+func TestKeyTypeAI_NoMask(t *testing.T) {
+	t.Parallel()
+
+	kp := NewKeyProcessor()
+	w, h := 4, 4
+	frameSize := w*h + 2*(w/2)*(h/2)
+
+	kp.SetKey("cam1", KeyConfig{
+		Type:    KeyTypeAI,
+		Enabled: true,
+	})
+	// No AI mask injected.
+
+	fill := makeYUV420Frame(w, h, 200, 100, 150)
+	bg := makeYUV420Frame(w, h, 50, 128, 128)
+	original := make([]byte, len(bg))
+	copy(original, bg)
+
+	result := kp.Process(bg, map[string][]byte{"cam1": fill}, w, h)
+
+	// With no AI mask, the source should pass through unchanged (bg unmodified).
+	require.Len(t, result, frameSize)
+	require.Equal(t, original, result, "no AI mask should leave bg unchanged")
+}
+
+func TestSetAIMask_Clear(t *testing.T) {
+	t.Parallel()
+
+	kp := NewKeyProcessor()
+	w, h := 4, 4
+	ySize := w * h
+	frameSize := ySize + 2*(w/2)*(h/2)
+
+	kp.SetKey("cam1", KeyConfig{
+		Type:    KeyTypeAI,
+		Enabled: true,
+	})
+
+	// Set a fully opaque mask.
+	mask := make([]byte, ySize)
+	for i := range mask {
+		mask[i] = 255
+	}
+	kp.SetAIMask("cam1", mask)
+
+	fill := makeYUV420Frame(w, h, 200, 100, 150)
+	bg := makeYUV420Frame(w, h, 50, 128, 128)
+
+	result := kp.Process(bg, map[string][]byte{"cam1": fill}, w, h)
+
+	// With fully opaque mask, Y should be fill value (200).
+	for i := 0; i < ySize; i++ {
+		require.Equal(t, byte(200), result[i],
+			"with mask Y[%d] should be fill (200)", i)
+	}
+
+	// Clear the mask.
+	kp.ClearAIMask("cam1")
+
+	// Process again with fresh bg.
+	bg2 := makeYUV420Frame(w, h, 50, 128, 128)
+	original2 := make([]byte, len(bg2))
+	copy(original2, bg2)
+
+	result2 := kp.Process(bg2, map[string][]byte{"cam1": fill}, w, h)
+
+	// After clearing, bg should be unchanged (no mask = skip).
+	require.Len(t, result2, frameSize)
+	require.Equal(t, original2, result2, "after ClearAIMask, bg should be unchanged")
+}
+
+func TestKeyProcessorBridge_HasEnabledKeysWithFills_AIKey(t *testing.T) {
+	t.Parallel()
+
+	kp := NewKeyProcessor()
+	bridge := NewKeyProcessorBridge(kp)
+
+	// No keys at all.
+	require.False(t, bridge.HasEnabledKeysWithFills())
+
+	// AI key enabled, no fills cached.
+	kp.SetKey("cam1", KeyConfig{
+		Type:    KeyTypeAI,
+		Enabled: true,
+	})
+
+	// AI keys should make HasEnabledKeysWithFills return true even without fills.
+	require.True(t, bridge.HasEnabledKeysWithFills(),
+		"AI key should cause HasEnabledKeysWithFills to return true without fills")
+}
+
+func TestKeyProcessor_AIKeyHasEnabledKeys(t *testing.T) {
+	t.Parallel()
+
+	kp := NewKeyProcessor()
+
+	require.False(t, kp.HasEnabledKeys())
+	require.False(t, kp.hasEnabledAIKeys())
+
+	kp.SetKey("cam1", KeyConfig{
+		Type:    KeyTypeAI,
+		Enabled: true,
+	})
+
+	require.True(t, kp.HasEnabledKeys())
+	require.True(t, kp.hasEnabledAIKeys())
+
+	// Disable the AI key.
+	kp.SetKey("cam1", KeyConfig{
+		Type:    KeyTypeAI,
+		Enabled: false,
+	})
+
+	require.False(t, kp.HasEnabledKeys())
+	require.False(t, kp.hasEnabledAIKeys())
+}
+
+func TestKeyProcessor_AIKeyEnabledSources(t *testing.T) {
+	t.Parallel()
+
+	kp := NewKeyProcessor()
+	kp.SetKey("cam1", KeyConfig{
+		Type:          KeyTypeAI,
+		Enabled:       true,
+		AISensitivity: 0.7,
+		AIEdgeSmooth:  0.3,
+		AIBackground:  "blur:10",
+	})
+
+	sources := kp.EnabledSources()
+	require.Len(t, sources, 1)
+
+	cfg, ok := sources["cam1"]
+	require.True(t, ok)
+	require.Equal(t, KeyTypeAI, cfg.Type)
+	require.Equal(t, float32(0.7), cfg.AISensitivity)
+	require.Equal(t, float32(0.3), cfg.AIEdgeSmooth)
+	require.Equal(t, "blur:10", cfg.AIBackground)
+}

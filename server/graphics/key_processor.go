@@ -12,6 +12,7 @@ type KeyType string
 const (
 	KeyTypeChroma KeyType = "chroma"
 	KeyTypeLuma   KeyType = "luma"
+	KeyTypeAI     KeyType = "ai"
 )
 
 // KeyConfig describes the key configuration for a source.
@@ -37,6 +38,11 @@ type KeyConfig struct {
 	// FillSource specifies which source provides the fill layer.
 	// If empty, the source itself is used as both fill and key.
 	FillSource string `json:"fillSource,omitempty"`
+
+	// AI key params
+	AISensitivity float32 `json:"aiSensitivity,omitempty"` // confidence threshold 0-1
+	AIEdgeSmooth  float32 `json:"aiEdgeSmooth,omitempty"`  // temporal smoothing 0-1
+	AIBackground  string  `json:"aiBackground,omitempty"`  // "transparent"|"blur:N"|"color:RRGGBB"|"source:key"
 }
 
 // KeyProcessor manages per-source upstream key configurations and applies
@@ -52,6 +58,7 @@ type KeyProcessor struct {
 	spillWorkBuf  []byte               // reused across frames for spill suppression copy
 	maskBuf       []byte               // reused luma-resolution mask buffer (width*height)
 	chromaMaskBuf []byte               // reused chroma-resolution mask buffer (w/2*h/2)
+	aiMasks       map[string][]byte    // per-source AI-generated masks (injected externally)
 }
 
 // NewKeyProcessor creates a new key processor with no keys configured.
@@ -129,6 +136,19 @@ func (kp *KeyProcessor) HasEnabledKeys() bool {
 	return false
 }
 
+// hasEnabledAIKeys returns true if any enabled key is of type AI.
+// Used by the bridge to determine if AI keys are active (which don't need fills).
+func (kp *KeyProcessor) hasEnabledAIKeys() bool {
+	kp.mu.RLock()
+	defer kp.mu.RUnlock()
+	for _, cfg := range kp.keys {
+		if cfg.Enabled && cfg.Type == KeyTypeAI {
+			return true
+		}
+	}
+	return false
+}
+
 // EnabledSources returns the set of source keys that have enabled upstream keys.
 func (kp *KeyProcessor) EnabledSources() map[string]KeyConfig {
 	kp.mu.RLock()
@@ -140,6 +160,25 @@ func (kp *KeyProcessor) EnabledSources() map[string]KeyConfig {
 		}
 	}
 	return result
+}
+
+// SetAIMask injects a pre-computed AI segmentation mask for the given source.
+// The mask must be width*height bytes at luma resolution (0=transparent, 255=opaque).
+// Called from the segmentation pipeline after each inference.
+func (kp *KeyProcessor) SetAIMask(source string, mask []byte) {
+	kp.mu.Lock()
+	if kp.aiMasks == nil {
+		kp.aiMasks = make(map[string][]byte)
+	}
+	kp.aiMasks[source] = mask
+	kp.mu.Unlock()
+}
+
+// ClearAIMask removes the cached AI mask for a source.
+func (kp *KeyProcessor) ClearAIMask(source string) {
+	kp.mu.Lock()
+	delete(kp.aiMasks, source)
+	kp.mu.Unlock()
 }
 
 // Process applies all enabled upstream keys to the background frame.
@@ -215,6 +254,14 @@ func (kp *KeyProcessor) Process(bg []byte, fills map[string][]byte, width, heigh
 			mask = ChromaKeyWithSpillColorInto(kp.maskBuf, kp.chromaMaskBuf, workFill, width, height, keyColor, cfg.Similarity, cfg.Smoothness, cfg.SpillSuppress, spillCb, spillCr)
 		case KeyTypeLuma:
 			mask = LumaKeyInto(kp.maskBuf, workFill, width, height, cfg.LowClip, cfg.HighClip, cfg.Softness)
+		case KeyTypeAI:
+			// Use pre-computed AI mask (injected via SetAIMask).
+			if aiMask, ok := kp.aiMasks[source]; ok && len(aiMask) >= ySize {
+				mask = kp.maskBuf[:ySize]
+				copy(mask, aiMask[:ySize])
+			} else {
+				continue // no mask available yet (inference hasn't completed)
+			}
 		default:
 			continue
 		}
