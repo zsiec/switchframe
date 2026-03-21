@@ -61,7 +61,7 @@ func TestPreprocessNV12ToRGB(t *testing.T) {
 
 	// Sample 100 interior pixels from each plane to verify correctness.
 	for i := 0; i < 100; i++ {
-		px := (i * pixCount / 100) + pixCount/8 // skip very first pixels
+		px := (i * (pixCount - 1)) / 100 // evenly spaced within [0, pixCount-1]
 		r := rgb[0*pixCount+px]
 		g := rgb[1*pixCount+px]
 		b := rgb[2*pixCount+px]
