@@ -286,6 +286,46 @@ server/                          # Go module (github.com/zsiec/switchframe/serve
     stinger_demos.go             #   3 animated stinger clips (whoosh, slam, musical) with synthesized audio
     stinger_audio.go             #   WAV generation and audio synthesis (whoosh sweep, slam impact, musical sting)
     srt_push.go                  #   SRT file pusher with wall-clock pacing for demo mode
+  stmap/                         # ST map (per-pixel coordinate remapping)
+    types.go                     #   STMap, AnimatedSTMap, ValidateName, sentinel errors
+    processor.go                 #   Bilinear warp engine (16.16 fixed-point LUTs, int32)
+    registry.go                  #   STMapRegistry: source/program assignments, state broadcast
+    generator.go                 #   Generator registry + dispatch
+    generator_correction.go      #   identity, barrel, pincushion, fisheye_to_rectilinear, corner_pin
+    generator_creative.go        #   heat_shimmer, dream, ripple, lens_breathe, vortex (animated)
+    store.go                     #   File persistence (~/.switchframe/stmaps/)
+    exr.go                       #   Pure Go OpenEXR reader (ZIP/ZIPS/uncompressed, float/half)
+    png.go                       #   16-bit PNG reader
+    raw.go                       #   Raw float32 binary reader/writer
+    warp_kernels_amd64.s         #   amd64 assembly bilinear warp with prefetch
+    warp_kernels_arm64.s         #   arm64 assembly bilinear warp with PRFM prefetch
+    warp_kernels_generic.go      #   Go fallback for other platforms
+  gpu/                           # GPU-accelerated video processing
+    context.go                   #   CUDA context, device init, streams (build tag: cgo && cuda)
+    metal_context.go             #   Metal context, command queue, pipeline cache (build tag: darwin)
+    metal_bridge.h               #   C function declarations for Metal operations
+    metal_bridge.m               #   Objective-C Metal API wrappers (offset-aware dispatch)
+    metal_embed_darwin.go        #   Embedded metallib via go:embed
+    pool.go                      #   GPU frame pool (CUDA cuMemAllocPitch)
+    metal_pool.go                #   Metal frame pool (MTLBuffer, unified memory)
+    upload.go                    #   YUV420p → NV12 upload (CUDA)
+    metal_upload.go              #   YUV420p → NV12 upload (Metal, zero-copy unified memory)
+    download.go                  #   NV12 → YUV420p download (CUDA)
+    metal_download.go            #   NV12 → YUV420p download (Metal)
+    gpu_nodes.go                 #   GPU pipeline bridge nodes (upload, download, stmap, key, layout, compositor)
+    gpu_nodes_stub.go            #   No-op stubs for non-GPU builds
+    stub.go                      #   Full stub (no CUDA, no Metal)
+    metal/                       #   Metal compute shaders (.metal) + Makefile
+      convert.metal              #     YUV420p↔NV12 conversion
+      blend.metal                #     Transition blending (uniform, fade, alpha, wipe)
+      scale.metal                #     Bilinear + Lanczos-3 scaling
+      key.metal                  #     Chroma/luma keying
+      composite.metal            #     PIP compositor
+      dsk.metal                  #     DSK graphics overlay
+      stmap.metal                #     ST map warp (bilinear sampling)
+      fruc.metal                 #     Frame rate up-conversion
+      v210.metal                 #     V210↔NV12 for MXL
+    cuda/                        #   CUDA kernels (.cu) + Makefile
   internal/                      # Shared types
     types.go                     #   ControlRoomState, SourceInfo, AudioChannel, MacroExecutionState, SCTE35State
     atomicutil/max.go            #   UpdateMax(): lock-free atomic max update via CAS loop
@@ -374,7 +414,8 @@ ui/                              # SvelteKit frontend (Svelte 5 + TypeScript)
       LayoutPanel.svelte         #   PIP/multi-layout control panel (preset strip, slot controls)
       LayoutOverlay.svelte       #   PIP layout drag overlay with amber tally
       StatsPanel.svelte          #   Debug stats slide-out panel (pipeline, frames, audio)
-      BottomTabs.svelte          #   Tabbed bottom panel (Audio/Layout/Graphics/Clips/Replay/Keys/Captions/SCTE-35/Macros/Presets)
+      STMapPanel.svelte          #   ST map control panel (sources, program effects, library)
+      BottomTabs.svelte          #   Tabbed bottom panel (Audio/Layout/Graphics/Clips/Replay/Keys/Captions/SCTE-35/Macros/Presets/STMap)
       auto-animation.svelte.ts   #   Auto transition animation state
       auto-animation.test.ts     #   Tests for auto animation
       macro-actions.ts           #   Macro action metadata, categories, graphics layer constants
@@ -438,6 +479,8 @@ Dockerfile                       # Multi-stage build (UI → Go → runtime)
 - **Operator Voice Comms:** Server-side voice comms for multi-operator workflows. `server/comms/` package: Opus encode/decode (48kHz mono, 20ms frames), N-1 PCM mixing (each participant hears everyone except themselves), VAD (voice activity detection). WebTransport bidirectional streams carry Opus frames with 1-byte type prefix wire protocol. REST API: join/leave/mute/status. CommsBar UI component with push-to-talk (backtick key), volume slider, participant badges with speaking indicators. Auto-duck: program audio dims 12dB during active comms (manual DIM button for permanent duck). Max 6 participants. AudioWorklet-based mic capture for low-latency; separate capture/playback AudioContexts to preserve browser echo cancellation.
 - **Replay UI Revamp:** Pause/resume/seek/speed controls on replay player. Quick-replay buttons (5s/10s/30s) in TransitionControls area. Seek bar with position scrubbing. JKL keyboard shortcuts (shuttle control), I/O mark shortcuts, Shift+1/2/3 speed presets. Replay active indicator dot in BottomTabs. Collapsible clip workspace in ReplayPanel. Minimal replay strip in SimpleMode. 7 new REST endpoints (quick, pause, resume, seek, speed, marks, peek). Replay monitor shows live source feed when idle.
 - **Clock-Driven Audio Mixer:** Replaced event-driven mix-on-arrival with clock-driven output ticker. `PCMRingBuffer` per channel stores processed PCM (bursty ingest → steady output). `outputTicker` goroutine produces one AAC frame per tick at ~21.3ms cadence (1024 samples / 48kHz). Decouples output timing from source arrival patterns — eliminates audio stuttering with SRT sources that have bursty frame delivery. Legacy passthrough, mixBuffer, deadline ticker, and crossfade accumulation code removed.
+- **ST Map (Per-Pixel Warp):** `server/stmap/` package: per-pixel coordinate remapping for lens correction (barrel, pincushion, fisheye, corner_pin) and creative program effects (heat_shimmer, dream, ripple, lens_breathe, vortex). Per-source correction applied in `sourceDecoder` post-decode/pre-fan-out (all consumers see corrected frames). Program-wide effects via `stmapProgramNode` pipeline node. 10 built-in generators (5 static + 5 animated with precomputed cycles). Upload formats: pure Go EXR reader (ZIP/ZIPS, float/half), 16-bit PNG, raw float32 binary. File persistence at `~/.switchframe/stmaps/`. 12 REST endpoints, 4 macro actions, state broadcast via `ControlRoomState.STMap`. STMapPanel UI in BottomTabs (sources zone, program effects button grid, collapsible library). Assembly warp kernels (amd64/arm64) with int32 LUTs, software prefetch, eliminated IMULQ.
+- **GPU Acceleration (Metal + CUDA):** `server/gpu/` package with dual backend: Metal on macOS (Apple Silicon), CUDA on Linux (NVIDIA). Auto-detected at startup — `gpu.NewContext()` returns Metal or CUDA context, stub returns `ErrGPUNotAvailable`. Build tags: `darwin` (Metal), `cgo && cuda` (CUDA), `(!cgo || !cuda) && !darwin` (stub). 9 Metal compute shaders matching CUDA kernels (convert, blend, scale, key, composite, dsk, stmap, fruc, v210). Objective-C bridge (`metal_bridge.m`) with offset-aware dispatch for NV12 UV-plane operations. GPU pipeline bridge nodes implement `switcher.PipelineNode`: upload → key → layout → compositor → stmap → download. Apple Silicon unified memory enables zero-copy upload/download. Metallib compiled by `make build`/`make demo` (auto-detected), embedded in binary via `//go:embed`. ST map GPU warp uses hardware bilinear texture sampling (<1ms vs 29ms CPU). `ProcessingFrame.GPUData` field (type `any`) carries GPU frame through pipeline without circular imports.
 - **What's stubbed:** ISO per-source recording (v2.5), WebGPU dissolve (Canvas 2D fallback works)
 
 ## Key Architecture Decisions
@@ -545,6 +588,9 @@ Dockerfile                       # Multi-stage build (UI → Go → runtime)
 - **Operator voice comms:** `server/comms/` package with Opus codec (48kHz mono, 20ms frames = 960 samples). `Manager` runs a 20ms mix loop goroutine that collects PCM from all participants, produces N-1 mixes (each participant hears everyone except themselves), and Opus-encodes the result. Wire protocol over WebTransport bidirectional streams: `[type_byte][payload]` where type 0x01 = audio, 0x02 = control. Client uses `AudioWorkletNode` for mic capture (replacing deprecated `ScriptProcessorNode`) with separate capture and playback `AudioContext` instances to preserve browser echo cancellation. WebCodecs `AudioEncoder`/`AudioDecoder` for client-side Opus codec. Auto-duck dims program audio by 12dB when any comms participant is speaking (VAD-triggered). Always available — no CLI flag needed; comms manager starts unconditionally in `app.go`.
 - **Clock-driven audio mixer:** `outputTicker` goroutine produces audio frames at a fixed ~21.3ms cadence (1024/48000 Hz), reading from per-channel `PCMRingBuffer` ring buffers. Ingest path (IngestFrame/IngestPCM) decodes and processes audio into each channel's ring buffer asynchronously. The ticker sums all active buffers, applies master processing (LUFS, limiter), encodes, and outputs. This decoupling eliminates timing dependency on source frame arrival — critical for SRT sources with bursty/jittery delivery. Ring buffer uses newest-wins overflow (oldest samples discarded). When buffer underruns, returns silence to prevent freeze-repeat artifacts.
 - **Replay transport controls:** `replayPlayer` supports pause/resume/seek/speed changes during playback. Pause holds the current frame on output. Seek accepts 0.0-1.0 position and computes target frame index. Speed changes take effect on the next frame tick. `Manager.QuickReplay(source, seconds, speed)` is a one-call shortcut that marks in/out, selects source, and starts playback. `PeekFrame(source)` returns the most recent H.264 keyframe from the replay buffer for thumbnail preview. 7 new REST endpoints: `/api/replay/{quick,pause,resume,seek,speed,marks,peek}`.
+
+- **ST map architecture:** Per-source correction lives in `sourceDecoder` output path (post-decode, pre-fan-out), so all consumers (preview, replay, pipeline) see corrected frames. Program-wide creative effects are a `stmapProgramNode` pipeline node after DSK compositor. Both share `STMapProcessor` bilinear warp engine with int32 16.16 fixed-point LUTs. Animated maps precompute a cycle of frames (90 default, 300 max). Processors pre-built at generation time via `sync.Once`-guarded `BuildProcessors()` to avoid pipeline goroutine freeze. Assembly kernels (amd64/arm64) with software prefetch (PREFETCHT0/PRFM) hide cache miss latency from random source pixel access pattern. EXR parser handles ZIP predictor (delta decode + byte interleave) per OpenEXR ImfZip.cpp spec.
+- **GPU pipeline integration:** GPU bridge nodes implement `switcher.PipelineNode` and are inserted into `buildNodeList()` via `SetGPUNodes()`. `ProcessingFrame.GPUData any` carries the GPU frame through the pipeline without circular imports (`gpu` imports `switcher` for interfaces, `switcher` does NOT import `gpu`). Upload node acquires from GPU frame pool, attaches to `GPUData`. Download node converts back to CPU YUV420p, releases GPU frame. If any GPU node fails, it passes the frame through unchanged (graceful CPU fallback). NV12 is the GPU-internal format. UV-plane operations use offset-aware Metal dispatch (`[encoder setBuffer:offset:atIndex:]`). Staging buffers cached per-dimension on the context.
 
 ## Prism Dependency
 
