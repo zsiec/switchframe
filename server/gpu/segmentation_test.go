@@ -11,8 +11,8 @@ import (
 )
 
 const (
-	// defaultModelPath is the standard path for the selfie segmenter ONNX model.
-	defaultModelPath = "/opt/switchframe/models/selfie_segmenter.onnx"
+	// defaultModelPath is the standard path for the u2netp segmentation ONNX model.
+	defaultModelPath = "/opt/switchframe/models/u2netp.onnx"
 )
 
 // modelPath returns the path to the segmentation model ONNX file,

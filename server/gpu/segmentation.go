@@ -8,7 +8,8 @@ package gpu
 #include <stdint.h>
 
 // Preprocessing kernel (defined in cuda/preprocess.cu, linked via libswitchframe_cuda.a)
-cudaError_t nv12_to_rgb_nhwc(
+// CHW variant for u2netp: output [3, outH, outW] planar float32
+cudaError_t nv12_to_rgb_chw(
     float* rgbOut,
     const uint8_t* nv12,
     int srcW, int srcH, int srcPitch,
@@ -35,8 +36,8 @@ import (
 const (
 	// segModelW and segModelH are the input dimensions for the MediaPipe
 	// Selfie Segmentation model.
-	segModelW = 256
-	segModelH = 256
+	segModelW = 320
+	segModelH = 320
 )
 
 // SegmentationSession is a per-source inference session with pre-allocated
@@ -48,8 +49,8 @@ type SegmentationSession struct {
 	stream C.cudaStream_t // dedicated per-source CUDA stream
 
 	// Pre-allocated GPU buffers
-	rgbBuf  unsafe.Pointer // [1, 256, 256, 3] float32 NHWC (model input)
-	maskBuf unsafe.Pointer // [1, 256, 256, 1] float32 (model output)
+	rgbBuf  unsafe.Pointer // [1, 3, 320, 320] float32 CHW (model input)
+	maskBuf unsafe.Pointer // [1, 1, 320, 320] float32 (model output, first of 7)
 	maskU8  unsafe.Pointer // [srcH, srcW] uint8 upscaled mask (final output)
 
 	srcW, srcH     int // source frame resolution
@@ -85,14 +86,14 @@ func NewSegmentationSession(ctx *Context, engine *TRTEngine, srcW, srcH int) (*S
 		return nil, fmt.Errorf("gpu: segmentation: stream create failed: %d", rc)
 	}
 
-	// Allocate model input buffer: [1, 256, 256, 3] float32 NHWC
+	// Allocate model input buffer: [1, 3, 320, 320] float32 CHW
 	rgbSize := C.size_t(segModelW * segModelH * 3 * 4) // 3 channels * 4 bytes/float32
 	if rc := C.cudaMalloc(&s.rgbBuf, rgbSize); rc != C.cudaSuccess {
 		s.Close()
 		return nil, fmt.Errorf("gpu: segmentation: alloc rgbBuf failed: %d", rc)
 	}
 
-	// Allocate model output buffer: [1, 256, 256, 1] float32
+	// Allocate model output buffer: [1, 1, 320, 320] float32 (u2netp has 7 outputs, we use the first)
 	maskSize := C.size_t(segModelW * segModelH * 1 * 4) // 1 channel * 4 bytes/float32
 	if rc := C.cudaMalloc(&s.maskBuf, maskSize); rc != C.cudaSuccess {
 		s.Close()
@@ -121,8 +122,8 @@ func NewSegmentationSession(ctx *Context, engine *TRTEngine, srcW, srcH int) (*S
 // returns a device pointer to a uint8 mask at source resolution.
 //
 // The pipeline:
-//  1. PreprocessNV12ToRGBNHWC: NV12 GPU frame -> 256x256 float32 NHWC
-//  2. TRTContext.Infer: run model, producing 256x256 float32 mask
+//  1. NV12→CHW RGB: NV12 GPU frame → 320x320 float32 CHW (u2netp input format)
+//  2. TRTContext.Infer: run u2netp, producing 320x320 float32 mask
 //  3. MaskFloatToU8Upscale: convert + bilinear upscale to source resolution
 //  4. cudaStreamSynchronize: ensure all async ops complete
 //
@@ -136,10 +137,9 @@ func (s *SegmentationSession) Segment(frame *GPUFrame) (unsafe.Pointer, error) {
 		return nil, fmt.Errorf("gpu: segmentation: nil frame")
 	}
 
-	// Step 1: Preprocess NV12 -> NHWC float32 on our dedicated stream.
-	// We call the NHWC kernel directly with our stream rather than going through
-	// the PreprocessNV12ToRGBNHWC wrapper which uses ctx.stream and syncs.
-	rc := C.nv12_to_rgb_nhwc(
+	// Step 1: Preprocess NV12 → CHW float32 on our dedicated stream.
+	// u2netp expects NCHW [1, 3, 320, 320] with values in [0, 1].
+	rc := C.nv12_to_rgb_chw(
 		(*C.float)(s.rgbBuf),
 		(*C.uint8_t)(unsafe.Pointer(uintptr(frame.DevPtr))),
 		C.int(frame.Width), C.int(frame.Height), C.int(frame.Pitch),
@@ -225,7 +225,10 @@ func NewSegmentationManager(ctx *Context, modelPath string) (*SegmentationManage
 	if err := os.MkdirAll(planDir, 0o755); err != nil {
 		return nil, fmt.Errorf("gpu: segmentation: create plan cache dir: %w", err)
 	}
-	planPath := filepath.Join(planDir, "selfie_segmenter.plan")
+	// Derive plan filename from ONNX filename
+	onnxBase := filepath.Base(modelPath)
+	planName := onnxBase[:len(onnxBase)-len(filepath.Ext(onnxBase))] + ".plan"
+	planPath := filepath.Join(planDir, planName)
 
 	slog.Info("gpu: segmentation: building/loading TensorRT engine",
 		"onnx", modelPath,
