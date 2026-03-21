@@ -42,9 +42,9 @@ func TestSegmentationManagerCreate(t *testing.T) {
 	defer mgr.Close()
 
 	// Verify engine was loaded with expected dimensions.
-	// MediaPipe selfie segmenter: input [1,256,256,3] = 196608, output [1,256,256,1] = 65536
-	assert.Equal(t, 256*256*3, mgr.engine.InputSize(), "engine input size")
-	assert.Equal(t, 256*256*1, mgr.engine.OutputSize(), "engine output size")
+	// u2netp: input [1,3,320,320] = 307200, output [1,1,320,320] = 102400
+	assert.Equal(t, 320*320*3, mgr.engine.InputSize(), "engine input size")
+	assert.Equal(t, 320*320*1, mgr.engine.OutputSize(), "engine output size")
 }
 
 func TestSegmentationSession(t *testing.T) {
