@@ -2,10 +2,16 @@
 
 package gpu
 
-import "time"
+import (
+	"time"
+	"unsafe"
+)
 
 // Ensure time is used (referenced by GPUPipelineNode interface).
 var _ = time.Duration(0)
+
+// Ensure unsafe is used.
+var _ unsafe.Pointer
 
 // Context is a stub for non-CUDA builds.
 type Context struct{}
@@ -396,4 +402,22 @@ type GPUDecoder struct{}
 // NewGPUDecoder returns ErrGPUNotAvailable on non-CUDA builds.
 func NewGPUDecoder(ctx *Context, threadCount int) (*GPUDecoder, error) {
 	return nil, ErrGPUNotAvailable
+}
+
+// PreprocessNV12ToRGB returns ErrGPUNotAvailable on non-CUDA builds.
+func PreprocessNV12ToRGB(ctx *Context, rgbOut unsafe.Pointer, src *GPUFrame, outW, outH int) error {
+	return ErrGPUNotAvailable
+}
+
+// AllocRGBBuffer returns ErrGPUNotAvailable on non-CUDA builds.
+func AllocRGBBuffer(outW, outH int) (unsafe.Pointer, error) {
+	return nil, ErrGPUNotAvailable
+}
+
+// FreeRGBBuffer is a no-op on non-CUDA builds.
+func FreeRGBBuffer(buf unsafe.Pointer) {}
+
+// DownloadRGBBuffer returns ErrGPUNotAvailable on non-CUDA builds.
+func DownloadRGBBuffer(dst []float32, devPtr unsafe.Pointer, outW, outH int) error {
+	return ErrGPUNotAvailable
 }

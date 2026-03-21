@@ -3,7 +3,7 @@ CXX := g++
 ARCH := -arch=sm_89  # Ada Lovelace (L4)
 CFLAGS := -O3 -Xcompiler -fPIC -std=c++17
 CXXFLAGS := -O2 -fPIC -std=c++17
-SOURCES := convert.cu blend.cu key.cu scale.cu composite.cu dsk.cu stmap.cu fruc.cu v210.cu
+SOURCES := convert.cu blend.cu key.cu scale.cu composite.cu dsk.cu stmap.cu fruc.cu v210.cu preprocess.cu
 OBJECTS := $(SOURCES:.cu=.o)
 LIBRARY := libswitchframe_cuda.a
 
