@@ -327,7 +327,7 @@ export interface MacroExecutionState {
 }
 
 export interface KeyConfig {
-	type: 'chroma' | 'luma';
+	type: 'chroma' | 'luma' | 'ai';
 	enabled: boolean;
 	keyColorY?: number;
 	keyColorCb?: number;
@@ -339,6 +339,10 @@ export interface KeyConfig {
 	highClip?: number;
 	softness?: number;
 	fillSource?: string;
+	// AI key params
+	aiSensitivity?: number;
+	aiEdgeSmooth?: number;
+	aiBackground?: string;
 }
 
 export type ReplayPlayerState = 'idle' | 'loading' | 'playing' | 'paused';

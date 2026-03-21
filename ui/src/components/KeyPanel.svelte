@@ -11,7 +11,7 @@
 	let { state: crState }: Props = $props();
 
 	let selectedSource = $derived(Object.keys(crState.sources).sort()[0] ?? '');
-	let keyType = $state<'none' | 'chroma' | 'luma'>('none');
+	let keyType = $state<'none' | 'chroma' | 'luma' | 'ai'>('none');
 	let enabled = $state(true);
 
 	// Chroma params (defaults match Green Screen preset)
@@ -26,6 +26,13 @@
 	let lowClip = $state(0.0);
 	let highClip = $state(0.8);
 	let softness = $state(0.1);
+
+	// AI params
+	let aiSensitivity = $state(0.7);
+	let aiEdgeSmooth = $state(0.5);
+	let aiBackground = $state('transparent');
+	let aiBlurRadius = $state(10);
+	let aiColorHex = $state('#00FF00');
 
 	// Color swatch derived from current YCbCr values
 	let colorHex = $derived(ycbcrToHex(keyColorY, keyColorCb, keyColorCr));
@@ -78,6 +85,19 @@
 				lowClip = config.lowClip ?? 0.0;
 				highClip = config.highClip ?? 0.8;
 				softness = config.softness ?? 0.1;
+			} else if (config.type === 'ai') {
+				aiSensitivity = config.aiSensitivity ?? 0.7;
+				aiEdgeSmooth = config.aiEdgeSmooth ?? 0.5;
+				const bg = config.aiBackground ?? 'transparent';
+				if (bg.startsWith('blur:')) {
+					aiBackground = 'blur';
+					aiBlurRadius = parseInt(bg.split(':')[1]) || 10;
+				} else if (bg.startsWith('color:')) {
+					aiBackground = 'color';
+					aiColorHex = '#' + bg.split(':')[1];
+				} else {
+					aiBackground = bg || 'transparent';
+				}
 			}
 		}).catch(() => {
 			if (gen !== loadGeneration) return; // stale response
@@ -110,8 +130,15 @@
 			return;
 		}
 
+		let aiBg: string | undefined;
+		if (keyType === 'ai') {
+			if (aiBackground === 'blur') aiBg = `blur:${aiBlurRadius}`;
+			else if (aiBackground === 'color') aiBg = `color:${aiColorHex.replace('#', '')}`;
+			else aiBg = aiBackground;
+		}
+
 		const config: KeyConfig = {
-			type: keyType,
+			type: keyType as 'chroma' | 'luma' | 'ai',
 			enabled,
 			keyColorY: keyType === 'chroma' ? keyColorY : undefined,
 			keyColorCb: keyType === 'chroma' ? keyColorCb : undefined,
@@ -122,6 +149,9 @@
 			lowClip: keyType === 'luma' ? lowClip : undefined,
 			highClip: keyType === 'luma' ? highClip : undefined,
 			softness: keyType === 'luma' ? softness : undefined,
+			aiSensitivity: keyType === 'ai' ? aiSensitivity : undefined,
+			aiEdgeSmooth: keyType === 'ai' ? aiEdgeSmooth : undefined,
+			aiBackground: keyType === 'ai' ? aiBg : undefined,
 		};
 
 		apiCall(setSourceKey(activeSource, config), 'Set key');
@@ -159,6 +189,7 @@
 			<button class="type-btn" class:active={keyType === 'none'} onclick={() => keyType = 'none'}>None</button>
 			<button class="type-btn" class:active={keyType === 'chroma'} onclick={() => keyType = 'chroma'}>Chroma</button>
 			<button class="type-btn" class:active={keyType === 'luma'} onclick={() => keyType = 'luma'}>Luma</button>
+			<button class="type-btn ai-btn" class:active={keyType === 'ai'} onclick={() => keyType = 'ai'}>AI</button>
 		</div>
 	</div>
 
@@ -237,6 +268,43 @@
 				<input type="range" min="0" max="1" step="0.01" bind:value={softness} class="slider" />
 				</label>
 			</div>
+		</div>
+	{/if}
+
+	{#if keyType === 'ai'}
+		<div class="key-controls">
+			<div class="slider-group">
+				<label class="slider-label">Sensitivity: {(aiSensitivity * 100).toFixed(0)}%
+				<input type="range" min="0" max="1" step="0.01" bind:value={aiSensitivity} class="slider" />
+				</label>
+			</div>
+			<div class="slider-group">
+				<label class="slider-label">Edge Smoothing: {(aiEdgeSmooth * 100).toFixed(0)}%
+				<input type="range" min="0" max="1" step="0.01" bind:value={aiEdgeSmooth} class="slider" />
+				</label>
+			</div>
+			<div class="bg-mode-group">
+				<span class="field-label">Background</span>
+				<div class="type-buttons">
+					<button class="type-btn" class:active={aiBackground === 'transparent'} onclick={() => aiBackground = 'transparent'}>Key</button>
+					<button class="type-btn" class:active={aiBackground === 'blur'} onclick={() => aiBackground = 'blur'}>Blur</button>
+					<button class="type-btn" class:active={aiBackground === 'color'} onclick={() => aiBackground = 'color'}>Color</button>
+				</div>
+			</div>
+			{#if aiBackground === 'blur'}
+				<div class="slider-group">
+					<label class="slider-label">Blur Radius: {aiBlurRadius}
+					<input type="range" min="1" max="50" step="1" bind:value={aiBlurRadius} class="slider" />
+					</label>
+				</div>
+			{/if}
+			{#if aiBackground === 'color'}
+				<div class="color-group">
+					<label class="slider-label">Background Color
+					<input type="color" bind:value={aiColorHex} class="color-picker" />
+					</label>
+				</div>
+			{/if}
 		</div>
 	{/if}
 
@@ -332,6 +400,32 @@
 		background: var(--accent-blue-light);
 		color: var(--accent-blue);
 		border-color: rgba(59, 130, 246, 0.4);
+	}
+
+	.type-btn.ai-btn.active {
+		background: rgba(168, 85, 247, 0.15);
+		color: rgb(168, 85, 247);
+		border-color: rgba(168, 85, 247, 0.4);
+	}
+
+	.bg-mode-group {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+	}
+
+	.color-group {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+	}
+
+	.color-picker {
+		width: 100%;
+		height: 28px;
+		border: 1px solid var(--border);
+		border-radius: 4px;
+		cursor: pointer;
 	}
 
 	.enable-label {
