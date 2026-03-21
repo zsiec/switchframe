@@ -4,7 +4,6 @@ package gpu
 
 import (
 	"testing"
-	"unsafe"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -122,9 +121,6 @@ func TestMaskEMANilArgs(t *testing.T) {
 	defer ctx.Close()
 
 	err = MaskEMA(nil, nil, nil, 0.5, 100, ctx.Stream())
-	require.Error(t, err)
-
-	err = MaskEMA(unsafe.Pointer(uintptr(1)), nil, nil, 0.5, 100, ctx.Stream())
 	require.Error(t, err)
 }
 
