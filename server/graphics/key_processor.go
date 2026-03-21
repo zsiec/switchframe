@@ -1,8 +1,11 @@
 package graphics
 
 import (
+	"encoding/hex"
 	"log/slog"
 	"slices"
+	"strconv"
+	"strings"
 	"sync"
 )
 
@@ -59,6 +62,7 @@ type KeyProcessor struct {
 	maskBuf       []byte               // reused luma-resolution mask buffer (width*height)
 	chromaMaskBuf []byte               // reused chroma-resolution mask buffer (w/2*h/2)
 	aiMasks       map[string][]byte    // per-source AI-generated masks (injected externally)
+	blurBuf       []byte               // reused for AI background modes (blur, color replacement)
 }
 
 // NewKeyProcessor creates a new key processor with no keys configured.
@@ -256,11 +260,61 @@ func (kp *KeyProcessor) Process(bg []byte, fills map[string][]byte, width, heigh
 			mask = LumaKeyInto(kp.maskBuf, workFill, width, height, cfg.LowClip, cfg.HighClip, cfg.Softness)
 		case KeyTypeAI:
 			// Use pre-computed AI mask (injected via SetAIMask).
-			if aiMask, ok := kp.aiMasks[source]; ok && len(aiMask) >= ySize {
-				mask = kp.maskBuf[:ySize]
-				copy(mask, aiMask[:ySize])
-			} else {
+			aiMask, aiOk := kp.aiMasks[source]
+			if !aiOk || len(aiMask) < ySize {
 				continue // no mask available yet (inference hasn't completed)
+			}
+			mask = kp.maskBuf[:ySize]
+			copy(mask, aiMask[:ySize])
+
+			// Handle AI background replacement modes.
+			bgMode := cfg.AIBackground
+			if bgMode != "" && bgMode != "transparent" {
+				// Ensure blurBuf is large enough.
+				if cap(kp.blurBuf) < frameSize {
+					kp.blurBuf = make([]byte, frameSize)
+				}
+				bgBuf := kp.blurBuf[:frameSize]
+
+				if strings.HasPrefix(bgMode, "blur:") {
+					// Blur the source frame's background, keep person sharp.
+					radius := parseBlurRadius(bgMode)
+					BoxBlurYUV420(bgBuf, workFill, width, height, radius)
+
+					// Composite person (from original fill, using AI mask) onto blurred background.
+					blendMaskY(&bgBuf[0], &workFill[0], &mask[0], ySize)
+					chromaMask := kp.chromaMaskBuf[:uvSize]
+					downsampleMask2x2(chromaMask, mask, width, height)
+					blendMaskY(&bgBuf[ySize], &workFill[ySize], &chromaMask[0], uvSize)
+					blendMaskY(&bgBuf[ySize+uvSize], &workFill[ySize+uvSize], &chromaMask[0], uvSize)
+
+					// Replace workFill with the composited result and set mask to fully opaque
+					// so the entire modified frame replaces the program.
+					workFill = bgBuf
+					for i := range mask {
+						mask[i] = 255
+					}
+
+				} else if strings.HasPrefix(bgMode, "color:") {
+					// Fill background with solid color, composite person on top.
+					cy, ccb, ccr := parseColorHex(bgMode)
+					fillYUVColor(bgBuf, width, height, cy, ccb, ccr)
+
+					// Composite person onto solid color background using AI mask.
+					blendMaskY(&bgBuf[0], &workFill[0], &mask[0], ySize)
+					chromaMask := kp.chromaMaskBuf[:uvSize]
+					downsampleMask2x2(chromaMask, mask, width, height)
+					blendMaskY(&bgBuf[ySize], &workFill[ySize], &chromaMask[0], uvSize)
+					blendMaskY(&bgBuf[ySize+uvSize], &workFill[ySize+uvSize], &chromaMask[0], uvSize)
+
+					// Replace workFill with the composited result and set mask to fully opaque.
+					workFill = bgBuf
+					for i := range mask {
+						mask[i] = 255
+					}
+				}
+				// "source:KEY" mode would be handled by fills map — the fill is already another source.
+				// Not yet implemented; falls through to standard mask blend.
 			}
 		default:
 			continue
@@ -310,5 +364,84 @@ func downsampleMask2x2(dst, src []byte, width, height int) {
 				int(src[row1+lx]) + int(src[row1+lx+1])
 			dst[dstOff+px] = byte((sum + 2) >> 2)
 		}
+	}
+}
+
+// parseBlurRadius extracts the radius from "blur:N" and clamps to [1, 50].
+func parseBlurRadius(mode string) int {
+	s := strings.TrimPrefix(mode, "blur:")
+	n, err := strconv.Atoi(s)
+	if err != nil || n < 1 {
+		return 1
+	}
+	if n > 50 {
+		return 50
+	}
+	return n
+}
+
+// parseColorHex extracts RGB from "color:RRGGBB" and converts to YCbCr (BT.709 limited range).
+// Returns mid-gray on parse failure.
+func parseColorHex(mode string) (y, cb, cr uint8) {
+	s := strings.TrimPrefix(mode, "color:")
+	if len(s) != 6 {
+		return 128, 128, 128 // mid-gray fallback
+	}
+	rgb, err := hex.DecodeString(s)
+	if err != nil || len(rgb) != 3 {
+		return 128, 128, 128
+	}
+	return rgbToYCbCr709(rgb[0], rgb[1], rgb[2])
+}
+
+// rgbToYCbCr709 converts RGB to BT.709 limited-range YCbCr.
+// Y: [16, 235], Cb/Cr: [16, 240].
+func rgbToYCbCr709(r, g, b uint8) (y, cb, cr uint8) {
+	rr := float64(r) / 255.0
+	gg := float64(g) / 255.0
+	bb := float64(b) / 255.0
+
+	yLin := 0.2126*rr + 0.7152*gg + 0.0722*bb
+	cbLin := (bb - yLin) / 1.8556
+	crLin := (rr - yLin) / 1.5748
+
+	yOut := 16.0 + 219.0*yLin
+	cbOut := 128.0 + 224.0*cbLin
+	crOut := 128.0 + 224.0*crLin
+
+	return clampU8(yOut), clampU8(cbOut), clampU8(crOut)
+}
+
+// clampU8 clamps a float64 to [0, 255] and rounds to nearest byte.
+func clampU8(v float64) uint8 {
+	if v < 0 {
+		return 0
+	}
+	if v > 255 {
+		return 255
+	}
+	return uint8(v + 0.5)
+}
+
+// fillYUVColor fills a YUV420p buffer with a constant color.
+func fillYUVColor(dst []byte, width, height int, y, cb, cr uint8) {
+	ySize := width * height
+	uvSize := (width / 2) * (height / 2)
+	frameSize := ySize + 2*uvSize
+	if len(dst) < frameSize {
+		return
+	}
+
+	// Fill Y plane
+	for i := 0; i < ySize; i++ {
+		dst[i] = y
+	}
+	// Fill Cb plane
+	for i := 0; i < uvSize; i++ {
+		dst[ySize+i] = cb
+	}
+	// Fill Cr plane
+	for i := 0; i < uvSize; i++ {
+		dst[ySize+uvSize+i] = cr
 	}
 }
