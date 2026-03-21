@@ -62,18 +62,19 @@ func (t *Timer) Close() {
 // PipelineMetrics tracks GPU pipeline performance counters.
 type PipelineMetrics struct {
 	// Per-operation timing (microseconds, atomic for concurrent reads)
-	UploadUs    atomic.Int64
-	EncodeUs    atomic.Int64
-	DownloadUs  atomic.Int64
-	ScaleUs     atomic.Int64
-	BlendUs     atomic.Int64
-	KeyUs       atomic.Int64
-	CompositeUs atomic.Int64
-	DSKUs       atomic.Int64
-	STMapUs     atomic.Int64
-	FRUCUs      atomic.Int64
-	V210Us      atomic.Int64
-	TotalUs     atomic.Int64
+	UploadUs        atomic.Int64
+	EncodeUs        atomic.Int64
+	DownloadUs      atomic.Int64
+	ScaleUs         atomic.Int64
+	BlendUs         atomic.Int64
+	KeyUs           atomic.Int64
+	CompositeUs     atomic.Int64
+	DSKUs           atomic.Int64
+	STMapUs         atomic.Int64
+	FRUCUs          atomic.Int64
+	V210Us          atomic.Int64
+	SegmentationUs  atomic.Int64 // AI segmentation inference time
+	TotalUs         atomic.Int64
 
 	// Frame counters
 	FramesProcessed atomic.Int64
@@ -83,20 +84,21 @@ type PipelineMetrics struct {
 // Snapshot returns a JSON-serializable view of GPU pipeline metrics.
 func (m *PipelineMetrics) Snapshot() map[string]any {
 	return map[string]any{
-		"upload_us":    m.UploadUs.Load(),
-		"encode_us":    m.EncodeUs.Load(),
-		"download_us":  m.DownloadUs.Load(),
-		"scale_us":     m.ScaleUs.Load(),
-		"blend_us":     m.BlendUs.Load(),
-		"key_us":       m.KeyUs.Load(),
-		"composite_us": m.CompositeUs.Load(),
-		"dsk_us":       m.DSKUs.Load(),
-		"stmap_us":     m.STMapUs.Load(),
-		"fruc_us":      m.FRUCUs.Load(),
-		"v210_us":      m.V210Us.Load(),
-		"total_us":     m.TotalUs.Load(),
-		"frames":       m.FramesProcessed.Load(),
-		"drops":        m.FramesDropped.Load(),
+		"upload_us":        m.UploadUs.Load(),
+		"encode_us":        m.EncodeUs.Load(),
+		"download_us":      m.DownloadUs.Load(),
+		"scale_us":         m.ScaleUs.Load(),
+		"blend_us":         m.BlendUs.Load(),
+		"key_us":           m.KeyUs.Load(),
+		"composite_us":     m.CompositeUs.Load(),
+		"dsk_us":           m.DSKUs.Load(),
+		"stmap_us":         m.STMapUs.Load(),
+		"fruc_us":          m.FRUCUs.Load(),
+		"v210_us":          m.V210Us.Load(),
+		"segmentation_us":  m.SegmentationUs.Load(),
+		"total_us":         m.TotalUs.Load(),
+		"frames":           m.FramesProcessed.Load(),
+		"drops":            m.FramesDropped.Load(),
 	}
 }
 
