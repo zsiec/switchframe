@@ -409,6 +409,11 @@ func PreprocessNV12ToRGB(ctx *Context, rgbOut unsafe.Pointer, src *GPUFrame, out
 	return ErrGPUNotAvailable
 }
 
+// PreprocessNV12ToRGBNHWC returns ErrGPUNotAvailable on non-CUDA builds.
+func PreprocessNV12ToRGBNHWC(ctx *Context, rgbOut unsafe.Pointer, src *GPUFrame, outW, outH int) error {
+	return ErrGPUNotAvailable
+}
+
 // AllocRGBBuffer returns ErrGPUNotAvailable on non-CUDA builds.
 func AllocRGBBuffer(outW, outH int) (unsafe.Pointer, error) {
 	return nil, ErrGPUNotAvailable

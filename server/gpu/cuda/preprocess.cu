@@ -55,6 +55,49 @@ __global__ void nv12_to_rgb_chw_kernel(
     rgbOut[2 * outH * outW + pixIdx] = b;
 }
 
+// NHWC variant: output layout [1, outH, outW, 3] for models expecting HWC format
+// (e.g., MediaPipe Selfie Segmentation with NHWC input).
+__global__ void nv12_to_rgb_nhwc_kernel(
+    float* __restrict__ rgbOut,      // [outH, outW, 3] HWC interleaved
+    const uint8_t* __restrict__ nv12,
+    int srcW, int srcH, int srcPitch,
+    int outW, int outH)
+{
+    int ox = blockIdx.x * blockDim.x + threadIdx.x;
+    int oy = blockIdx.y * blockDim.y + threadIdx.y;
+    if (ox >= outW || oy >= outH) return;
+
+    float sx = (float)ox * (float)(srcW - 1) / (float)(outW - 1);
+    float sy = (float)oy * (float)(srcH - 1) / (float)(outH - 1);
+
+    int ix = (int)sx, iy = (int)sy;
+    float fx = sx - ix, fy = sy - iy;
+    int ix1 = min(ix + 1, srcW - 1);
+    int iy1 = min(iy + 1, srcH - 1);
+
+    float Y = (nv12[iy * srcPitch + ix] * (1.0f - fx) + nv12[iy * srcPitch + ix1] * fx) * (1.0f - fy)
+            + (nv12[iy1 * srcPitch + ix] * (1.0f - fx) + nv12[iy1 * srcPitch + ix1] * fx) * fy;
+
+    int uvOffset = srcPitch * srcH;
+    int cx = (int)(sx + 0.5f) / 2;
+    int cy = (int)(sy + 0.5f) / 2;
+    cx = min(cx, srcW / 2 - 1);
+    cy = min(cy, srcH / 2 - 1);
+    float Cb = (float)nv12[uvOffset + cy * srcPitch + cx * 2];
+    float Cr = (float)nv12[uvOffset + cy * srcPitch + cx * 2 + 1];
+
+    float y_adj = 1.164f * (Y - 16.0f);
+    float r = fminf(fmaxf(y_adj + 1.793f * (Cr - 128.0f), 0.0f), 255.0f) / 255.0f;
+    float g = fminf(fmaxf(y_adj - 0.213f * (Cb - 128.0f) - 0.533f * (Cr - 128.0f), 0.0f), 255.0f) / 255.0f;
+    float b = fminf(fmaxf(y_adj + 2.112f * (Cb - 128.0f), 0.0f), 255.0f) / 255.0f;
+
+    // Write HWC interleaved
+    int idx = (oy * outW + ox) * 3;
+    rgbOut[idx + 0] = r;
+    rgbOut[idx + 1] = g;
+    rgbOut[idx + 2] = b;
+}
+
 extern "C" {
 cudaError_t nv12_to_rgb_chw(
     float* rgbOut,
@@ -66,6 +109,19 @@ cudaError_t nv12_to_rgb_chw(
     dim3 block(16, 16);  // 256 threads, good for 256x256 output
     dim3 grid((outW + block.x - 1) / block.x, (outH + block.y - 1) / block.y);
     nv12_to_rgb_chw_kernel<<<grid, block, 0, stream>>>(
+        rgbOut, nv12, srcW, srcH, srcPitch, outW, outH);
+    return cudaGetLastError();
+}
+cudaError_t nv12_to_rgb_nhwc(
+    float* rgbOut,
+    const uint8_t* nv12,
+    int srcW, int srcH, int srcPitch,
+    int outW, int outH,
+    cudaStream_t stream)
+{
+    dim3 block(16, 16);
+    dim3 grid((outW + block.x - 1) / block.x, (outH + block.y - 1) / block.y);
+    nv12_to_rgb_nhwc_kernel<<<grid, block, 0, stream>>>(
         rgbOut, nv12, srcW, srcH, srcPitch, outW, outH);
     return cudaGetLastError();
 }

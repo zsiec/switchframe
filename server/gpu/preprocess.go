@@ -13,6 +13,12 @@ cudaError_t nv12_to_rgb_chw(
     int srcW, int srcH, int srcPitch,
     int outW, int outH,
     cudaStream_t stream);
+cudaError_t nv12_to_rgb_nhwc(
+    float* rgbOut,
+    const uint8_t* nv12,
+    int srcW, int srcH, int srcPitch,
+    int outW, int outH,
+    cudaStream_t stream);
 */
 import "C"
 
@@ -52,6 +58,33 @@ func PreprocessNV12ToRGB(ctx *Context, rgbOut unsafe.Pointer, src *GPUFrame, out
 
 	if syncRc := C.cudaStreamSynchronize(ctx.stream); syncRc != C.cudaSuccess {
 		return fmt.Errorf("gpu: preprocess: stream sync failed: %d", syncRc)
+	}
+	return nil
+}
+
+// PreprocessNV12ToRGBNHWC is like PreprocessNV12ToRGB but outputs NHWC layout
+// [outH, outW, 3] — used by models that expect HWC input (e.g., MediaPipe).
+func PreprocessNV12ToRGBNHWC(ctx *Context, rgbOut unsafe.Pointer, src *GPUFrame, outW, outH int) error {
+	if ctx == nil || src == nil {
+		return ErrGPUNotAvailable
+	}
+	if rgbOut == nil {
+		return fmt.Errorf("gpu: preprocess NHWC: rgbOut is nil")
+	}
+
+	rc := C.nv12_to_rgb_nhwc(
+		(*C.float)(rgbOut),
+		(*C.uint8_t)(unsafe.Pointer(uintptr(src.DevPtr))),
+		C.int(src.Width), C.int(src.Height), C.int(src.Pitch),
+		C.int(outW), C.int(outH),
+		ctx.stream,
+	)
+	if rc != C.cudaSuccess {
+		return fmt.Errorf("gpu: preprocess NHWC: kernel failed: %d", rc)
+	}
+
+	if syncRc := C.cudaStreamSynchronize(ctx.stream); syncRc != C.cudaSuccess {
+		return fmt.Errorf("gpu: preprocess NHWC: stream sync failed: %d", syncRc)
 	}
 	return nil
 }
