@@ -6,6 +6,7 @@ package gpu
 #cgo CFLAGS: -I/usr/local/cuda/include -I/usr/include/x86_64-linux-gnu
 #cgo LDFLAGS: -L${SRCDIR}/cuda -lswitchframe_tensorrt -L/usr/local/cuda/lib64 -lnvinfer -lnvonnxparser -lnvinfer_plugin -lstdc++
 
+#include <cuda_runtime.h>
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdio.h>
