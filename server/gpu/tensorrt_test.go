@@ -49,7 +49,7 @@ func TestTRTEngineOptsDefaults(t *testing.T) {
 }
 
 func TestSegmentationSessionStub(t *testing.T) {
-	sess, err := NewSegmentationSession(nil, nil, 640, 480)
+	sess, err := NewSegmentationSession(nil, nil, 640, 480, 0, false)
 	require.ErrorIs(t, err, ErrTensorRTNotAvailable)
 	assert.Nil(t, sess)
 
@@ -69,7 +69,7 @@ func TestSegmentationManagerStub(t *testing.T) {
 
 	// Methods on zero-value should not panic.
 	var m SegmentationManager
-	err = m.EnableSource("test", 640, 480)
+	err = m.EnableSource("test", 640, 480, 0, false)
 	require.ErrorIs(t, err, ErrTensorRTNotAvailable)
 
 	m.DisableSource("test")

@@ -49,12 +49,18 @@ type SegmentationSession struct {
 	stream C.cudaStream_t // dedicated per-source CUDA stream
 
 	// Pre-allocated GPU buffers
-	rgbBuf  unsafe.Pointer // [1, 3, 320, 320] float32 CHW (model input)
-	maskBuf unsafe.Pointer // [1, 1, 320, 320] float32 (model output, first of 7)
-	maskU8  unsafe.Pointer // [srcH, srcW] uint8 upscaled mask (final output)
+	rgbBuf   unsafe.Pointer // [1, 3, 320, 320] float32 CHW (model input)
+	maskBuf  unsafe.Pointer // [1, 1, 320, 320] float32 (model output, first of 7)
+	maskU8   unsafe.Pointer // [srcH, srcW] uint8 upscaled mask (current frame)
+	prevMask unsafe.Pointer // [srcH, srcW] uint8 previous-frame mask (for EMA)
 
 	srcW, srcH     int // source frame resolution
-	modelW, modelH int // model input resolution (256x256)
+	modelW, modelH int // model input resolution
+
+	// Temporal smoothing state.
+	smoothing float32 // EMA alpha: 0 = no smoothing, 0.7 = heavy smoothing
+	hasPrev   bool    // false until the first frame has been processed
+	erode     bool    // apply 3×3 erosion after EMA to clean up boundary artefacts
 }
 
 // NewSegmentationSession creates a per-source inference session.
@@ -62,7 +68,10 @@ type SegmentationSession struct {
 // It allocates a dedicated CUDA stream and pre-allocates all GPU buffers
 // needed for preprocessing, inference, and post-processing. The engine
 // is shared across sessions; each session gets its own TRTContext.
-func NewSegmentationSession(ctx *Context, engine *TRTEngine, srcW, srcH int) (*SegmentationSession, error) {
+//
+// smoothing is the EMA alpha: 0 = no temporal smoothing, 0.7 = heavy smoothing.
+// erode enables 3×3 morphological erosion after EMA to clean up boundary artefacts.
+func NewSegmentationSession(ctx *Context, engine *TRTEngine, srcW, srcH int, smoothing float32, erode bool) (*SegmentationSession, error) {
 	if ctx == nil {
 		return nil, ErrGPUNotAvailable
 	}
@@ -74,11 +83,13 @@ func NewSegmentationSession(ctx *Context, engine *TRTEngine, srcW, srcH int) (*S
 	}
 
 	s := &SegmentationSession{
-		ctx:    ctx,
-		srcW:   srcW,
-		srcH:   srcH,
-		modelW: segModelW,
-		modelH: segModelH,
+		ctx:       ctx,
+		srcW:      srcW,
+		srcH:      srcH,
+		modelW:    segModelW,
+		modelH:    segModelH,
+		smoothing: smoothing,
+		erode:     erode,
 	}
 
 	// Create dedicated CUDA stream for this source.
@@ -105,6 +116,12 @@ func NewSegmentationSession(ctx *Context, engine *TRTEngine, srcW, srcH int) (*S
 	if rc := C.cudaMalloc(&s.maskU8, maskU8Size); rc != C.cudaSuccess {
 		s.Close()
 		return nil, fmt.Errorf("gpu: segmentation: alloc maskU8 failed: %d", rc)
+	}
+
+	// Allocate previous-frame mask buffer for EMA temporal smoothing.
+	if rc := C.cudaMalloc(&s.prevMask, maskU8Size); rc != C.cudaSuccess {
+		s.Close()
+		return nil, fmt.Errorf("gpu: segmentation: alloc prevMask failed: %d", rc)
 	}
 
 	// Create TRTContext from shared engine.
@@ -160,7 +177,67 @@ func (s *SegmentationSession) Segment(frame *GPUFrame) (unsafe.Pointer, error) {
 		return nil, fmt.Errorf("gpu: segmentation: mask upscale: %w", err)
 	}
 
-	// Step 4: Synchronize to ensure all work is complete before returning.
+	// Step 4: Temporal EMA smoothing (reduces per-frame flicker).
+	//
+	// EMA: smoothed = prevMask * alpha + maskU8 * (1 - alpha)
+	//
+	// We write the result into prevMask (reusing it as the output buffer to
+	// avoid aliasing — CUDA does not guarantee safe in-place reads/writes).
+	// After the kernel we copy prevMask → maskU8 so the caller sees the
+	// smoothed result in maskU8.
+	//
+	// On the first frame (hasPrev=false) or when smoothing=0, we skip EMA and
+	// just copy the raw upscaled mask into prevMask for next frame's reference.
+	size := s.srcW * s.srcH
+	if s.hasPrev && s.smoothing > 0 {
+		// Output into prevMask to avoid aliasing with the curr pointer.
+		if err := MaskEMA(s.prevMask, s.prevMask, s.maskU8, s.smoothing, size, s.stream); err != nil {
+			return nil, fmt.Errorf("gpu: segmentation: mask EMA: %w", err)
+		}
+		// Copy smoothed result back to maskU8 (the returned buffer).
+		if rc := C.cudaMemcpyAsync(
+			s.maskU8,
+			s.prevMask,
+			C.size_t(size),
+			C.cudaMemcpyDeviceToDevice,
+			s.stream,
+		); rc != C.cudaSuccess {
+			return nil, fmt.Errorf("gpu: segmentation: copy smoothed mask to output: %d", rc)
+		}
+	} else {
+		// First frame or no smoothing: seed prevMask with the raw mask.
+		if rc := C.cudaMemcpyAsync(
+			s.prevMask,
+			s.maskU8,
+			C.size_t(size),
+			C.cudaMemcpyDeviceToDevice,
+			s.stream,
+		); rc != C.cudaSuccess {
+			return nil, fmt.Errorf("gpu: segmentation: seed prevMask: %d", rc)
+		}
+	}
+	s.hasPrev = true
+
+	// Step 5: Optional 3×3 erosion to clean up thin artefacts at boundaries.
+	// Erosion is applied to maskU8 in-place via prevMask as a scratch buffer,
+	// then the eroded result is written back to maskU8.
+	if s.erode {
+		if err := MaskErode3x3(s.prevMask, s.maskU8, s.srcW, s.srcH, s.stream); err != nil {
+			return nil, fmt.Errorf("gpu: segmentation: mask erode: %w", err)
+		}
+		// Copy eroded result (in prevMask) back to maskU8 for the caller.
+		if rc := C.cudaMemcpyAsync(
+			s.maskU8,
+			s.prevMask,
+			C.size_t(size),
+			C.cudaMemcpyDeviceToDevice,
+			s.stream,
+		); rc != C.cudaSuccess {
+			return nil, fmt.Errorf("gpu: segmentation: copy eroded mask to output: %d", rc)
+		}
+	}
+
+	// Step 7: Synchronize to ensure all work is complete before returning.
 	if syncRc := C.cudaStreamSynchronize(s.stream); syncRc != C.cudaSuccess {
 		return nil, fmt.Errorf("gpu: segmentation: stream sync failed: %d", syncRc)
 	}
@@ -188,6 +265,10 @@ func (s *SegmentationSession) Close() {
 	if s.maskU8 != nil {
 		C.cudaFree(s.maskU8)
 		s.maskU8 = nil
+	}
+	if s.prevMask != nil {
+		C.cudaFree(s.prevMask)
+		s.prevMask = nil
 	}
 	if s.stream != nil {
 		C.cudaStreamDestroy(s.stream)
@@ -258,7 +339,10 @@ func NewSegmentationManager(ctx *Context, modelPath string) (*SegmentationManage
 
 // EnableSource creates a segmentation session for the given source.
 // If a session already exists for this source, it is replaced.
-func (m *SegmentationManager) EnableSource(sourceKey string, w, h int) error {
+//
+// smoothing is the EMA temporal smoothing factor (0 = no smoothing, 0.7 = heavy).
+// erode enables 3×3 morphological erosion after EMA to clean boundary artefacts.
+func (m *SegmentationManager) EnableSource(sourceKey string, w, h int, smoothing float32, erode bool) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -268,7 +352,7 @@ func (m *SegmentationManager) EnableSource(sourceKey string, w, h int) error {
 		delete(m.sessions, sourceKey)
 	}
 
-	session, err := NewSegmentationSession(m.ctx, m.engine, w, h)
+	session, err := NewSegmentationSession(m.ctx, m.engine, w, h, smoothing, erode)
 	if err != nil {
 		return fmt.Errorf("gpu: segmentation: enable source %q: %w", sourceKey, err)
 	}
@@ -277,6 +361,8 @@ func (m *SegmentationManager) EnableSource(sourceKey string, w, h int) error {
 	slog.Info("gpu: segmentation: enabled source",
 		"source", sourceKey,
 		"resolution", fmt.Sprintf("%dx%d", w, h),
+		"smoothing", smoothing,
+		"erode", erode,
 	)
 	return nil
 }

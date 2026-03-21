@@ -8,7 +8,7 @@ import "unsafe"
 type SegmentationSession struct{}
 
 // NewSegmentationSession returns ErrTensorRTNotAvailable on non-TensorRT builds.
-func NewSegmentationSession(ctx *Context, engine *TRTEngine, srcW, srcH int) (*SegmentationSession, error) {
+func NewSegmentationSession(ctx *Context, engine *TRTEngine, srcW, srcH int, smoothing float32, erode bool) (*SegmentationSession, error) {
 	return nil, ErrTensorRTNotAvailable
 }
 
@@ -29,7 +29,7 @@ func NewSegmentationManager(ctx *Context, modelPath string) (*SegmentationManage
 }
 
 // EnableSource returns ErrTensorRTNotAvailable on non-TensorRT builds.
-func (m *SegmentationManager) EnableSource(sourceKey string, w, h int) error {
+func (m *SegmentationManager) EnableSource(sourceKey string, w, h int, smoothing float32, erode bool) error {
 	return ErrTensorRTNotAvailable
 }
 

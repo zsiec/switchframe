@@ -23,6 +23,20 @@ cudaError_t mask_to_u8_upscale(
     uint8_t* dst, int dstW, int dstH,
     const float* src, int srcW, int srcH,
     cudaStream_t stream);
+
+// Temporal mask smoothing kernels (defined in cuda/mask_smooth.cu)
+cudaError_t mask_ema(
+    uint8_t* output,
+    const uint8_t* prev,
+    const uint8_t* curr,
+    float alpha,
+    int size,
+    cudaStream_t stream);
+cudaError_t mask_erode_3x3(
+    uint8_t* dst,
+    const uint8_t* src,
+    int width, int height,
+    cudaStream_t stream);
 */
 import "C"
 
@@ -176,6 +190,66 @@ func DownloadRGBBuffer(dst []float32, devPtr unsafe.Pointer, outW, outH int) err
 		C.cudaMemcpyDeviceToHost,
 	); rc != C.cudaSuccess {
 		return fmt.Errorf("gpu: DownloadRGBBuffer: cudaMemcpy failed: %d", rc)
+	}
+	return nil
+}
+
+// MaskEMA blends two uint8 device masks using per-pixel exponential moving average:
+//
+//	output[i] = prev[i] * alpha + curr[i] * (1 - alpha)
+//
+// alpha=0 uses curr entirely (no smoothing); alpha=1 holds prev (freeze).
+// Typical values: 0.5 (moderate), 0.7 (heavy, ~3-4 frame lag).
+// output, prev, curr must each point to size bytes on the device.
+func MaskEMA(output, prev, curr unsafe.Pointer, alpha float32, size int, stream C.cudaStream_t) error {
+	if output == nil {
+		return fmt.Errorf("gpu: MaskEMA: output is nil")
+	}
+	if prev == nil {
+		return fmt.Errorf("gpu: MaskEMA: prev is nil")
+	}
+	if curr == nil {
+		return fmt.Errorf("gpu: MaskEMA: curr is nil")
+	}
+	if size <= 0 {
+		return fmt.Errorf("gpu: MaskEMA: size must be positive, got %d", size)
+	}
+	rc := C.mask_ema(
+		(*C.uint8_t)(output),
+		(*C.uint8_t)(prev),
+		(*C.uint8_t)(curr),
+		C.float(alpha),
+		C.int(size),
+		stream,
+	)
+	if rc != C.cudaSuccess {
+		return fmt.Errorf("gpu: MaskEMA: kernel failed: %d", rc)
+	}
+	return nil
+}
+
+// MaskErode3x3 applies a 3×3 morphological erosion to the src device mask.
+// Each output pixel becomes the minimum of its 3×3 neighbourhood.
+// This removes thin artifacts at person/background boundaries.
+// dst and src must each point to width*height bytes on the device.
+func MaskErode3x3(dst, src unsafe.Pointer, width, height int, stream C.cudaStream_t) error {
+	if dst == nil {
+		return fmt.Errorf("gpu: MaskErode3x3: dst is nil")
+	}
+	if src == nil {
+		return fmt.Errorf("gpu: MaskErode3x3: src is nil")
+	}
+	if width <= 0 || height <= 0 {
+		return fmt.Errorf("gpu: MaskErode3x3: invalid dimensions %dx%d", width, height)
+	}
+	rc := C.mask_erode_3x3(
+		(*C.uint8_t)(dst),
+		(*C.uint8_t)(src),
+		C.int(width), C.int(height),
+		stream,
+	)
+	if rc != C.cudaSuccess {
+		return fmt.Errorf("gpu: MaskErode3x3: kernel failed: %d", rc)
 	}
 	return nil
 }

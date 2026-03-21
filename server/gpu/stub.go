@@ -436,3 +436,13 @@ func DownloadMaskU8(dst []byte, devPtr unsafe.Pointer, size int) error {
 func MaskFloatToU8Upscale(dstPtr unsafe.Pointer, dstW, dstH int, srcPtr unsafe.Pointer, srcW, srcH int, stream uintptr) error {
 	return ErrGPUNotAvailable
 }
+
+// MaskEMA returns ErrGPUNotAvailable on non-CUDA builds.
+func MaskEMA(output, prev, curr unsafe.Pointer, alpha float32, size int, stream uintptr) error {
+	return ErrGPUNotAvailable
+}
+
+// MaskErode3x3 returns ErrGPUNotAvailable on non-CUDA builds.
+func MaskErode3x3(dst, src unsafe.Pointer, width, height int, stream uintptr) error {
+	return ErrGPUNotAvailable
+}

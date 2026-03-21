@@ -60,8 +60,8 @@ func TestSegmentationSession(t *testing.T) {
 
 	const srcW, srcH = 1920, 1080
 
-	// Enable source
-	err = mgr.EnableSource("test-cam", srcW, srcH)
+	// Enable source (no smoothing for basic session test)
+	err = mgr.EnableSource("test-cam", srcW, srcH, 0, false)
 	require.NoError(t, err)
 	assert.True(t, mgr.IsEnabled("test-cam"))
 
@@ -106,7 +106,7 @@ func TestSegmentationMaskValues(t *testing.T) {
 
 	const srcW, srcH = 640, 480
 
-	err = mgr.EnableSource("mask-test", srcW, srcH)
+	err = mgr.EnableSource("mask-test", srcW, srcH, 0, false)
 	require.NoError(t, err)
 
 	pool, err := NewFramePool(ctx, srcW, srcH, 2)
@@ -184,7 +184,7 @@ func TestSegmentationManagerDisable(t *testing.T) {
 	const srcW, srcH = 640, 480
 
 	// Enable source
-	err = mgr.EnableSource("disable-test", srcW, srcH)
+	err = mgr.EnableSource("disable-test", srcW, srcH, 0, false)
 	require.NoError(t, err)
 	assert.True(t, mgr.IsEnabled("disable-test"))
 
@@ -200,7 +200,7 @@ func TestSegmentationManagerDisable(t *testing.T) {
 
 func TestSegmentationSessionNilArgs(t *testing.T) {
 	// Nil context
-	_, err := NewSegmentationSession(nil, &TRTEngine{}, 640, 480)
+	_, err := NewSegmentationSession(nil, &TRTEngine{}, 640, 480, 0, false)
 	require.ErrorIs(t, err, ErrGPUNotAvailable)
 
 	// Nil engine
@@ -208,12 +208,12 @@ func TestSegmentationSessionNilArgs(t *testing.T) {
 	require.NoError(t, err)
 	defer ctx.Close()
 
-	_, err = NewSegmentationSession(ctx, nil, 640, 480)
+	_, err = NewSegmentationSession(ctx, nil, 640, 480, 0, false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "nil engine")
 
 	// Invalid dimensions
-	_, err = NewSegmentationSession(ctx, &TRTEngine{}, 0, 480)
+	_, err = NewSegmentationSession(ctx, &TRTEngine{}, 0, 480, 0, false)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid source dimensions")
 }
@@ -250,12 +250,12 @@ func TestSegmentationManagerReplaceSource(t *testing.T) {
 	defer mgr.Close()
 
 	// Enable at one resolution
-	err = mgr.EnableSource("replace-test", 1920, 1080)
+	err = mgr.EnableSource("replace-test", 1920, 1080, 0.5, false)
 	require.NoError(t, err)
 	assert.True(t, mgr.IsEnabled("replace-test"))
 
 	// Re-enable at a different resolution (should replace cleanly)
-	err = mgr.EnableSource("replace-test", 640, 480)
+	err = mgr.EnableSource("replace-test", 640, 480, 0, false)
 	require.NoError(t, err)
 	assert.True(t, mgr.IsEnabled("replace-test"))
 }
