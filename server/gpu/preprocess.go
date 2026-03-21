@@ -153,6 +153,33 @@ func MaskFloatToU8Upscale(dstPtr unsafe.Pointer, dstW, dstH int, srcPtr unsafe.P
 	return nil
 }
 
+// AllocDeviceBytes allocates size bytes of GPU device memory.
+func AllocDeviceBytes(size int) (unsafe.Pointer, error) {
+	var ptr unsafe.Pointer
+	if rc := C.cudaMalloc(&ptr, C.size_t(size)); rc != C.cudaSuccess {
+		return nil, fmt.Errorf("gpu: AllocDeviceBytes(%d) failed: %d", size, rc)
+	}
+	return ptr, nil
+}
+
+// FreeDeviceBytes frees GPU device memory.
+func FreeDeviceBytes(ptr unsafe.Pointer) {
+	if ptr != nil {
+		C.cudaFree(ptr)
+	}
+}
+
+// UploadBytes copies a Go byte slice to GPU device memory.
+func UploadBytes(devPtr unsafe.Pointer, data []byte) error {
+	if devPtr == nil || len(data) == 0 {
+		return fmt.Errorf("gpu: UploadBytes: nil pointer or empty data")
+	}
+	if rc := C.cudaMemcpy(devPtr, unsafe.Pointer(&data[0]), C.size_t(len(data)), C.cudaMemcpyHostToDevice); rc != C.cudaSuccess {
+		return fmt.Errorf("gpu: UploadBytes: cudaMemcpy failed: %d", rc)
+	}
+	return nil
+}
+
 // DownloadMaskU8 copies a uint8 device buffer (e.g., segmentation mask) to a Go slice.
 func DownloadMaskU8(dst []byte, devPtr unsafe.Pointer, size int) error {
 	if devPtr == nil {

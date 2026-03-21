@@ -427,6 +427,15 @@ func DownloadRGBBuffer(dst []float32, devPtr unsafe.Pointer, outW, outH int) err
 	return ErrGPUNotAvailable
 }
 
+// AllocDeviceBytes returns ErrGPUNotAvailable on non-CUDA builds.
+func AllocDeviceBytes(size int) (unsafe.Pointer, error) { return nil, ErrGPUNotAvailable }
+
+// FreeDeviceBytes is a no-op on non-CUDA builds.
+func FreeDeviceBytes(ptr unsafe.Pointer) {}
+
+// UploadBytes returns ErrGPUNotAvailable on non-CUDA builds.
+func UploadBytes(devPtr unsafe.Pointer, data []byte) error { return ErrGPUNotAvailable }
+
 // DownloadMaskU8 returns ErrGPUNotAvailable on non-CUDA builds.
 func DownloadMaskU8(dst []byte, devPtr unsafe.Pointer, size int) error {
 	return ErrGPUNotAvailable
