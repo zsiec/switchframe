@@ -5,7 +5,6 @@ package gpu
 import (
 	"os"
 	"testing"
-	"unsafe"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -142,13 +141,8 @@ func TestSegmentationMaskValues(t *testing.T) {
 	// Even on synthetic data the model will produce some response.
 	maskSize := srcW * srcH
 	hostMask := make([]byte, maskSize)
-	rc := C.cudaMemcpy(
-		unsafe.Pointer(&hostMask[0]),
-		maskPtr,
-		C.size_t(maskSize),
-		C.cudaMemcpyDeviceToHost,
-	)
-	require.Equal(t, C.cudaSuccess, rc, "cudaMemcpy mask to host")
+	err = DownloadMaskU8(hostMask, maskPtr, maskSize)
+	require.NoError(t, err, "download mask to host")
 
 	// Count non-zero pixels
 	nonZero := 0

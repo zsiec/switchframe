@@ -139,6 +139,25 @@ func MaskFloatToU8Upscale(dstPtr unsafe.Pointer, dstW, dstH int, srcPtr unsafe.P
 	return nil
 }
 
+// DownloadMaskU8 copies a uint8 device buffer (e.g., segmentation mask) to a Go slice.
+func DownloadMaskU8(dst []byte, devPtr unsafe.Pointer, size int) error {
+	if devPtr == nil {
+		return fmt.Errorf("gpu: DownloadMaskU8: devPtr is nil")
+	}
+	if len(dst) < size {
+		return fmt.Errorf("gpu: DownloadMaskU8: dst too small: %d < %d", len(dst), size)
+	}
+	if rc := C.cudaMemcpy(
+		unsafe.Pointer(&dst[0]),
+		devPtr,
+		C.size_t(size),
+		C.cudaMemcpyDeviceToHost,
+	); rc != C.cudaSuccess {
+		return fmt.Errorf("gpu: DownloadMaskU8: cudaMemcpy failed: %d", rc)
+	}
+	return nil
+}
+
 // DownloadRGBBuffer copies a float32 CHW device buffer to a Go slice.
 // dst must have capacity >= 3 * outW * outH.
 func DownloadRGBBuffer(dst []float32, devPtr unsafe.Pointer, outW, outH int) error {
