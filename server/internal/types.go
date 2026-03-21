@@ -4,7 +4,7 @@ package internal
 // SourceKeyConfig describes the upstream key configuration for a source,
 // included in SourceInfo so the browser knows the current key state.
 type SourceKeyConfig struct {
-	Type           string  `json:"type"` // "chroma", "luma", or ""
+	Type           string  `json:"type"` // "chroma", "luma", "ai", or ""
 	Enabled        bool    `json:"enabled"`
 	KeyColorY      uint8   `json:"keyColorY,omitempty"`
 	KeyColorCb     uint8   `json:"keyColorCb,omitempty"`
@@ -18,6 +18,12 @@ type SourceKeyConfig struct {
 	HighClip       float32 `json:"highClip,omitempty"`
 	Softness       float32 `json:"softness,omitempty"`
 	FillSource     string  `json:"fillSource,omitempty"`
+
+	// AI key params
+	AISensitivity float32 `json:"aiSensitivity,omitempty"` // confidence threshold 0-1
+	AIEdgeSmooth  float32 `json:"aiEdgeSmooth,omitempty"`  // temporal smoothing 0-1
+	AIBackground  string  `json:"aiBackground,omitempty"`  // ""|"transparent"|"blur:N"|"color:RRGGBB"|"source:KEY"
+	AIAvailable   bool    `json:"aiAvailable,omitempty"`   // true if TensorRT segmentation is available on this server
 }
 
 // SourceInfo describes a connected video source and its current state.

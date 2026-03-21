@@ -116,6 +116,9 @@ type App struct {
 	stmapRegistry    *stmap.Registry
 	stmapStore       *stmap.Store
 
+	// AI background replacement: true when TensorRT segmentation is initialized.
+	aiSegAvailable bool
+
 	// Text rendering engines
 	textRenderer   *textrender.Renderer
 	tickerEngine   *graphics.TickerEngine

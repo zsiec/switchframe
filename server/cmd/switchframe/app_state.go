@@ -33,7 +33,13 @@ func sourceType(key string) string {
 // calling compositor.Status() (which would deadlock when called from the
 // compositor's own callback).
 func (a *App) enrichState(state internal.ControlRoomState, gfxOverride *graphics.State) internal.ControlRoomState {
-	// Enrich sources with type field and SRT info.
+	// Pre-fetch enabled key configs once for the source loop below.
+	var enabledKeys map[string]graphics.KeyConfig
+	if a.keyProcessor != nil {
+		enabledKeys = a.keyProcessor.EnabledSources()
+	}
+
+	// Enrich sources with type field, SRT info, and upstream key config.
 	for key, info := range state.Sources {
 		info.Type = sourceType(key)
 		if info.Type == "srt" && a.srtStats != nil {
@@ -65,6 +71,31 @@ func (a *App) enrichState(state internal.ControlRoomState, gfxOverride *graphics
 				PacketsBelated:       srtInfo.PacketsBelated,
 				ReconnectCount:       srtInfo.ReconnectCount,
 			}
+		}
+		// Attach upstream key configuration so the browser knows the current
+		// key type and parameters (including AI background replacement mode).
+		if kc, ok := enabledKeys[key]; ok {
+			skc := &internal.SourceKeyConfig{
+				Type:           string(kc.Type),
+				Enabled:        kc.Enabled,
+				KeyColorY:      kc.KeyColorY,
+				KeyColorCb:     kc.KeyColorCb,
+				KeyColorCr:     kc.KeyColorCr,
+				Similarity:     kc.Similarity,
+				Smoothness:     kc.Smoothness,
+				SpillSuppress:  kc.SpillSuppress,
+				SpillReplaceCb: kc.SpillReplaceCb,
+				SpillReplaceCr: kc.SpillReplaceCr,
+				LowClip:        kc.LowClip,
+				HighClip:       kc.HighClip,
+				Softness:       kc.Softness,
+				FillSource:     kc.FillSource,
+				AISensitivity:  kc.AISensitivity,
+				AIEdgeSmooth:   kc.AIEdgeSmooth,
+				AIBackground:   kc.AIBackground,
+				AIAvailable:    a.aiSegAvailable,
+			}
+			info.KeyConfig = skc
 		}
 		state.Sources[key] = info
 	}
