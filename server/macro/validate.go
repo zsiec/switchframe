@@ -142,6 +142,9 @@ func validateStep(i int, step Step, result *ValidationResult) {
 			})
 		}
 
+	case ActionKeySet:
+		validateKeySet(i, step, result)
+
 	// ST map actions.
 	case ActionSTMapAssignSource:
 		if !hasStringParam(step.Params, "map") {
@@ -351,6 +354,38 @@ func validateClipStep(i int, step Step, result *ValidationResult) {
 				Message: "clip_seek requires 'position' param (0.0-1.0)",
 			})
 		}
+	}
+}
+
+// validateKeySet checks key_set action parameter requirements.
+// The "source" param is already validated by the actionsRequiringSource map.
+// When type == "ai", AI-specific optional params are range-checked.
+func validateKeySet(i int, step Step, result *ValidationResult) {
+	keyType, _ := step.Params["type"].(string)
+	if keyType == "" {
+		// No type specified — allow (defaults to chroma on the server side).
+		return
+	}
+	switch keyType {
+	case "chroma", "luma":
+		// Valid types; no additional param checks required.
+	case "ai":
+		// Optional float params must be in [0, 1] when present.
+		for _, param := range []string{"aiSensitivity", "aiEdgeSmooth"} {
+			if v, ok := step.Params[param].(float64); ok {
+				if v < 0 || v > 1 {
+					result.Errors = append(result.Errors, ValidationError{
+						Step:    i,
+						Message: fmt.Sprintf("key_set %s must be between 0 and 1, got %v", param, v),
+					})
+				}
+			}
+		}
+	default:
+		result.Errors = append(result.Errors, ValidationError{
+			Step:    i,
+			Message: fmt.Sprintf("key_set type must be \"chroma\", \"luma\", or \"ai\", got %q", keyType),
+		})
 	}
 }
 

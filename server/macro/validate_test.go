@@ -758,3 +758,121 @@ func TestValidateSteps_CaptionTextNoParams(t *testing.T) {
 	result := ValidateSteps(steps)
 	require.False(t, result.HasErrors())
 }
+
+func TestValidateKeySetAI(t *testing.T) {
+	t.Parallel()
+	// key_set with type=ai and valid optional params should pass validation.
+	steps := []Step{
+		{Action: ActionKeySet, Params: map[string]any{
+			"source":        "cam1",
+			"type":          "ai",
+			"aiSensitivity": float64(0.8),
+			"aiEdgeSmooth":  float64(0.5),
+			"aiBackground":  "blur",
+		}},
+	}
+	result := ValidateSteps(steps)
+	require.False(t, result.HasErrors(), "expected valid AI key_set to pass; got: %+v", result.Errors)
+}
+
+func TestValidateKeySetAI_NoOptionalParams(t *testing.T) {
+	t.Parallel()
+	// type=ai with only source is valid — all AI params are optional.
+	steps := []Step{
+		{Action: ActionKeySet, Params: map[string]any{
+			"source": "cam1",
+			"type":   "ai",
+		}},
+	}
+	result := ValidateSteps(steps)
+	require.False(t, result.HasErrors(), "expected AI key_set with no optional params to pass; got: %+v", result.Errors)
+}
+
+func TestValidateKeySetAI_InvalidSensitivity(t *testing.T) {
+	t.Parallel()
+	// aiSensitivity > 1.0 should produce a validation error.
+	steps := []Step{
+		{Action: ActionKeySet, Params: map[string]any{
+			"source":        "cam1",
+			"type":          "ai",
+			"aiSensitivity": float64(1.5),
+		}},
+	}
+	result := ValidateSteps(steps)
+	require.True(t, result.HasErrors())
+	require.Len(t, result.Errors, 1)
+	require.Contains(t, result.Errors[0].Message, "aiSensitivity")
+	require.Contains(t, result.Errors[0].Message, "0 and 1")
+}
+
+func TestValidateKeySetAI_InvalidEdgeSmooth(t *testing.T) {
+	t.Parallel()
+	// aiEdgeSmooth < 0 should produce a validation error.
+	steps := []Step{
+		{Action: ActionKeySet, Params: map[string]any{
+			"source":       "cam1",
+			"type":         "ai",
+			"aiEdgeSmooth": float64(-0.1),
+		}},
+	}
+	result := ValidateSteps(steps)
+	require.True(t, result.HasErrors())
+	require.Len(t, result.Errors, 1)
+	require.Contains(t, result.Errors[0].Message, "aiEdgeSmooth")
+}
+
+func TestValidateKeySetAI_BothParamsInvalid(t *testing.T) {
+	t.Parallel()
+	// Both params out of range → two errors.
+	steps := []Step{
+		{Action: ActionKeySet, Params: map[string]any{
+			"source":        "cam1",
+			"type":          "ai",
+			"aiSensitivity": float64(2.0),
+			"aiEdgeSmooth":  float64(-1.0),
+		}},
+	}
+	result := ValidateSteps(steps)
+	require.True(t, result.HasErrors())
+	require.Len(t, result.Errors, 2)
+}
+
+func TestValidateKeySet_InvalidType(t *testing.T) {
+	t.Parallel()
+	// An unknown key type should be rejected.
+	steps := []Step{
+		{Action: ActionKeySet, Params: map[string]any{
+			"source": "cam1",
+			"type":   "magic",
+		}},
+	}
+	result := ValidateSteps(steps)
+	require.True(t, result.HasErrors())
+	require.Contains(t, result.Errors[0].Message, "magic")
+}
+
+func TestValidateKeySet_ValidChromaAndLuma(t *testing.T) {
+	t.Parallel()
+	for _, keyType := range []string{"chroma", "luma"} {
+		steps := []Step{
+			{Action: ActionKeySet, Params: map[string]any{
+				"source": "cam1",
+				"type":   keyType,
+			}},
+		}
+		result := ValidateSteps(steps)
+		require.False(t, result.HasErrors(), "expected key_set type=%q to pass; got: %+v", keyType, result.Errors)
+	}
+}
+
+func TestValidateKeySet_NoTypeIsValid(t *testing.T) {
+	t.Parallel()
+	// Omitting type entirely is fine (server defaults to chroma).
+	steps := []Step{
+		{Action: ActionKeySet, Params: map[string]any{
+			"source": "cam1",
+		}},
+	}
+	result := ValidateSteps(steps)
+	require.False(t, result.HasErrors())
+}
